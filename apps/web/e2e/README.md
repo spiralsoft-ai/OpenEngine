@@ -89,56 +89,16 @@ unzip it, and point `show-report` at the directory.
 
 ## What the rest needs
 
-The behaviours below are the ones we want next. Each names what has to exist
-before it can be written; nothing here is a change to the product, except where
-it says so.
+Everything else -- workflow runs, review, reactivation, auto-approve, failure,
+plans -- is written up as tickets in **`TICKETS.md`**, in dependency order, with
+the files each one touches and what "done" means.
 
-### Workflow runs (provision → implement → review)
-
-1. **An `origin` to base a run on.** `WORKFLOW_BASE_REF` is `origin/main`, and
-   provisioning fetches `+refs/heads/main` from it. The fixture repository has
-   no remote, so the harness needs a bare origin beside it and a first push.
-   *Small; harness only.*
-2. **The fake CLIs must speak MCP as clients.** A workflow step ends by calling
-   `complete_step` (or `fail_step`) on the run-bound MCP server the runtime
-   attaches, and nothing else ends it: no `complete_step`, no review step, and
-   after two corrections the run fails. The fake therefore has to read the
-   server it was given -- `--mcp-config` for Claude, `-c mcp_servers.workflow.*`
-   for Codex -- spawn it, and make a JSON-RPC `tools/call`. This is the single
-   largest prerequisite, and it unblocks 1e, 1f, 2, 3, and 4 below.
-   *New script step: `{"type": "tool", "name": "complete_step", "arguments": …}`.*
-3. **A `gh` that is not GitHub.** The reviewer's `add_comment` goes through
-   `GitHubSourceControl`, which shells out to `gh`. The binary is not a
-   `Settings` field, so the harness puts a fake `gh` first on `PATH` for the
-   server process and asserts on what it was called with. Note the reviewer is
-   refused `complete_step` until it has left at least one comment, and that it
-   needs a `pr_url`, which is a declared output of the implementation step.
-4. **Questions.** Both providers can ask: Claude through `AskUserQuestion`,
-   Codex through `item/tool/requestUserInput`. Both already normalize to
-   `user_input` approvals with a modal in the client.
-   *New script step: `{"type": "ask", "questions": [...]}`.*
-5. **Plans.** Only Claude produces `plan_approval` today (`ExitPlanMode`); Codex
-   has no app-server equivalent, so that test is Claude-only until it does.
-   *New script step: `{"type": "plan", "plan": "…"}`.*
-6. **A human decision has no button.** `POST /api/runs/{id}/human-review` exists
-   and the run page shows "Action required", but nothing in the client calls it.
-   A test that drives a run to its end through the browser needs that control to
-   exist first. *A product change, not a test one.*
-
-### The behaviours, once those exist
-
-| behaviour | needs | notes |
-| --- | --- | --- |
-| workspace provisioned, run reaches implementation | 1 | assert the run page's stages, and that the worktree exists on disk |
-| conversation streams tool calls and messages | 1 | the workflow conversation streams by polling the durable transcript, so assert through `/runs/{run}/conversations/{instance}` |
-| approval propagates and approving executes | 1, 2 | same card as the chat test, reached from the run page |
-| agent asks for clarification | 1, 2, 4 | answering resumes the same agent run |
-| `complete_step` advances to review | 1, 2 | assert the review step starts, and on which runner |
-| reviewer adds review comments | 1, 2, 3 | assert against the fake `gh`, not GitHub |
-| talking after review reopens implementation | 1, 2 | `StepReactivated`; the composer is only offered on editable steps |
-| auto-approve runs several requests unattended | 1, 2 | toggle in the conversation header; script several `run` steps and assert `decisionSource` is not `user` |
-| a failed workflow reads as failed | 1, 2 | `fail_step`, and a CLI that exits nonzero -- they surface differently |
-| a plan reaches the operator | 1, 2, 5 | Claude only |
+The short version: three prerequisites (an `origin` for provisioning to base
+runs on, fake CLIs that can call `complete_step` over MCP, and a `gh` that is
+not GitHub), then eight behaviour tickets that all depend on them. One of the
+findings there is a product gap rather than a test one: nothing in the client
+calls `POST /api/runs/{id}/human-review`, so a run cannot be finished through a
+browser today.
 
 ## Live provider CLIs
 
