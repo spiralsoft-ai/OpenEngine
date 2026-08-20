@@ -2653,3 +2653,31 @@ def test_the_built_client_is_revalidated_but_its_hashed_assets_are_not(tmp_path)
     assert page.headers["cache-control"] == "no-cache"
     assert asset.status_code == 200
     assert "immutable" in asset.headers["cache-control"]
+
+
+def test_every_client_route_is_reachable_by_url(tmp_path) -> None:
+    """Routing lives in the client, so a deep link the server does not know
+    about 404s on refresh rather than opening the page it names."""
+    runner = ConcurrentRunner()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<div id=root></div>")
+    app = create_app(_session(runner), {"test": runner}, dist)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return {
+                path: (await client.get(path)).status_code
+                for path in (
+                    "/",
+                    "/runs",
+                    "/runs/new",
+                    "/projects/manager",
+                    "/conversations",
+                )
+            }
+
+    assert asyncio.run(scenario()) == dict.fromkeys(
+        ("/", "/runs", "/runs/new", "/projects/manager", "/conversations"), 200
+    )

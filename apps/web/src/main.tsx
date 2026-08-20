@@ -16,18 +16,30 @@ import { NewWorkflowPage, RunDetailPage, RunsPage, useRuns } from "./runs";
 import { Sidebar, type RailSection } from "./sidebar";
 import "./styles.css";
 
+/** What the header says over a conversation nobody has started yet. */
+type NewChatIntro = { eyebrow: string; title: string; lede: string };
+
+const NEW_CHAT_INTRO: NewChatIntro = {
+  eyebrow: "New chat defaults",
+  title: "New conversation",
+  lede: "Choose what starts the next conversation and which runner answers.",
+};
+
 function ChatPanel({
   config,
   agentId,
   runner,
   onAgentChange,
   onRunnerChange,
+  intro,
 }: {
   config: EngineConfig;
   agentId: string;
   runner: string;
-  onAgentChange: (agentId: string) => void;
+  /** Omitted where the page talks to one agent, so there is nothing to pick. */
+  onAgentChange?: (agentId: string) => void;
   onRunnerChange: (runner: string) => void;
+  intro?: NewChatIntro;
 }) {
   return (
     <main className="panel">
@@ -37,6 +49,7 @@ function ChatPanel({
         runner={runner}
         onAgentChange={onAgentChange}
         onRunnerChange={onRunnerChange}
+        intro={intro}
       />
       <ConversationStats />
       <ChatThread />
@@ -60,12 +73,14 @@ function ChatHeader({
   runner,
   onAgentChange,
   onRunnerChange,
+  intro = NEW_CHAT_INTRO,
 }: {
   config: EngineConfig;
   agentId: string;
   runner: string;
-  onAgentChange: (agentId: string) => void;
+  onAgentChange?: (agentId: string) => void;
   onRunnerChange: (runner: string) => void;
+  intro?: NewChatIntro;
 }) {
   const remoteId = useAuiState((state) => state.threadListItem.remoteId);
   const custom = useAuiState((state) => state.threadListItem.custom) as
@@ -88,24 +103,33 @@ function ChatHeader({
   return (
     <header className="panel-head">
       <div className="panel-head-copy">
-        <p className="eyebrow">New chat defaults</p>
-        <h1>New conversation</h1>
-        <p className="lede">Choose what starts the next conversation and which runner answers.</p>
+        <p className="eyebrow">{intro.eyebrow}</p>
+        <h1>{intro.title}</h1>
+        <p className="lede">{intro.lede}</p>
       </div>
-      <label className="field">
-        <span>Agent</span>
-        <select
-          className="field-box"
-          value={agentId}
-          onChange={(event) => onAgentChange(event.target.value)}
-        >
-          {config.agents.map((agent) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.id} — {agent.description}
-            </option>
-          ))}
-        </select>
-      </label>
+      {onAgentChange ? (
+        <label className="field">
+          <span>Agent</span>
+          <select
+            className="field-box"
+            value={agentId}
+            onChange={(event) => onAgentChange(event.target.value)}
+          >
+            {config.agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.id} — {agent.description}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        // A page that exists to talk to one agent states which, the way an
+        // open conversation states the agent it was started on.
+        <div className="field">
+          <span>Agent</span>
+          <span className="field-box">{agentId}</span>
+        </div>
+      )}
       <label className="field">
         <span>Runner</span>
         <select
@@ -260,12 +284,14 @@ type Route =
   | { kind: "runs" }
   | { kind: "new-run" }
   | { kind: "run"; runId: string }
+  | { kind: "project-manager" }
   | { kind: "chat"; threadId?: string; runId?: string };
 
 function currentRoute(): Route {
   const path = window.location.pathname.replace(/\/$/, "") || "/";
   if (path === "/" || path === "/runs") return { kind: "runs" };
   if (path === "/runs/new") return { kind: "new-run" };
+  if (path === "/projects/manager") return { kind: "project-manager" };
   const workflowConversation = path.match(
     /^\/runs\/([^/]+)\/conversations\/([^/]+)$/,
   );
@@ -286,8 +312,25 @@ function currentRoute(): Route {
  *  showing where you are. A workflow's own conversation belongs to its run. */
 function sectionFor(route: Route): RailSection {
   if (route.kind === "chat") return route.runId ? "workflows" : "chats";
+  if (route.kind === "project-manager") return "projects";
   return "workflows";
 }
+
+/** The agent behind the Projects rail's Project Manager button.
+ *
+ *  A page of its own rather than a chat you have to configure: the point is to
+ *  talk to the project manager, so the agent is the page's rather than the
+ *  reader's to choose. Everything else about it is the new-chat screen, which
+ *  is what the tools for reading and scheduling workflow runs land in. */
+const PROJECT_MANAGER_AGENT = "project-manager";
+
+const PROJECT_MANAGER_INTRO: NewChatIntro = {
+  eyebrow: "OpenEngine / Projects",
+  title: "Project manager",
+  lede:
+    "Talk through a project's timeline and milestones. It cannot read or " +
+    "schedule workflow runs yet, so it says what it would do rather than doing it.",
+};
 
 /** One shell for every screen: the rail, and the page beside it.
  *
@@ -317,6 +360,7 @@ function App() {
     return <main className="state">Starting openengine…</main>;
 
   const chat = route.kind === "chat";
+  const projectManager = route.kind === "project-manager";
   // Switching the open conversation in place is for the rail beside a chat of
   // its own. A workflow step's transcript is reached through its run, so
   // leaving one is a move to another page rather than a swap under the URL.
@@ -324,7 +368,10 @@ function App() {
   const activeRunId = route.kind === "run" || route.kind === "chat" ? route.runId : undefined;
   return (
     <EngineRuntimeProvider
-      defaults={{ agentId, runner }}
+      // The project manager's page starts its own conversation, so what it
+      // creates is a chat with the project manager whatever the new-chat
+      // defaults happen to say.
+      defaults={{ agentId: projectManager ? PROJECT_MANAGER_AGENT : agentId, runner }}
       initialThreadId={chat ? route.threadId : undefined}
       rememberActiveThread={chat}
     >
@@ -337,7 +384,15 @@ function App() {
           activeConversationUrl={
             chat && route.runId ? window.location.pathname.replace(/\/$/, "") : undefined
           }
-          activeView={route.kind === "runs" ? "runs" : route.kind === "new-run" ? "new" : undefined}
+          activeView={
+            route.kind === "runs"
+              ? "runs"
+              : route.kind === "new-run"
+                ? "new"
+                : projectManager
+                  ? "project-manager"
+                  : undefined
+          }
         />
         {route.kind === "runs" ? (
           <RunsPage runs={runs} error={runsError} />
@@ -345,6 +400,14 @@ function App() {
           <NewWorkflowPage config={config} />
         ) : route.kind === "run" ? (
           <RunDetailPage runId={route.runId} />
+        ) : projectManager ? (
+          <ChatPanel
+            config={config}
+            agentId={PROJECT_MANAGER_AGENT}
+            runner={runner}
+            onRunnerChange={setRunner}
+            intro={PROJECT_MANAGER_INTRO}
+          />
         ) : (
           <ChatPanel
             config={config}
@@ -359,8 +422,14 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+export { App };
+
+// Mount where there is something to mount into. Importing this module for a
+// test is reading the routing table, not asking for a running application.
+const root = document.getElementById("root");
+if (root)
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );

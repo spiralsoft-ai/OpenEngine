@@ -140,7 +140,26 @@ describe("Sidebar", () => {
       "/runs/new",
     );
     expect(within(body("Chats")).getByRole("button", { name: "+ New chat" })).toBeInTheDocument();
+    expect(
+      within(body("Projects")).getByRole("link", { name: "Project Manager" }),
+    ).toHaveAttribute("href", "/projects/manager");
     expect(within(body("Projects")).getByText(/in progress/i)).toBeInTheDocument();
+  });
+
+  it("marks the Project Manager button only on its own page", () => {
+    const { rerender } = render(<Sidebar runs={[run]} initialSection="workflows" />);
+
+    expect(
+      within(body("Projects")).getByRole("link", { name: "Project Manager" }),
+    ).not.toHaveAttribute("data-active");
+
+    rerender(
+      <Sidebar runs={[run]} initialSection="projects" activeView="project-manager" />,
+    );
+
+    expect(
+      within(body("Projects")).getByRole("link", { name: "Project Manager" }),
+    ).toHaveAttribute("data-active", "true");
   });
 
   it("lists runs with their conversations and marks the one on screen", () => {

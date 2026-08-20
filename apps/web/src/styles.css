@@ -24,6 +24,14 @@
   --flame-deep: #c9351d;
   --flame-wash: #fbe7e2;
 
+  /* Orange, and only for Projects. Flame is spent on the one thing a screen is
+     asking to be finished; the project manager is somewhere you go to think
+     rather than something to finish, so it is marked apart from flame rather
+     than with it. Bright enough to carry ink rather than white -- 7.5:1 at
+     rest and 6.2:1 hovered, where the same orange under white would be 3.4. */
+  --ember: #f08a24;
+  --ember-deep: #dd7a12;
+
   --night: #111111;
   --night-raised: #1c1c1b;
   --night-active: #292927;
@@ -258,7 +266,7 @@ ul, ol { padding: 0; list-style: none; }
 /* The page you are already on, marked without taking the accent from the
    button beside it -- which assistant-ui also calls active when the new chat
    is the open one, and which stays flame either way. */
-.rail-button:not(.rail-button-primary)[data-active] {
+.rail-button:not(.rail-button-primary, .rail-button-ember)[data-active] {
   background: var(--night-active);
   border-color: #6a6a64;
 }
@@ -268,6 +276,12 @@ ul, ol { padding: 0; list-style: none; }
   border-color: var(--flame);
 }
 .rail-button-primary:hover { background: var(--flame-deep); border-color: var(--flame-deep); }
+.rail-button-ember {
+  color: var(--ink);
+  background: var(--ember);
+  border-color: var(--ember);
+}
+.rail-button-ember:hover { background: var(--ember-deep); border-color: var(--ember-deep); }
 
 .rail-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 

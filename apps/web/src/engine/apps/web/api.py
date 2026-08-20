@@ -1331,6 +1331,7 @@ def create_app(
 
         routes.extend(
             [
+                Route("/projects/manager", spa_page),
                 Route("/runs", spa_page),
                 Route("/runs/new", spa_page),
                 Route("/runs/{run_id}/conversations/{thread_id}", spa_page),

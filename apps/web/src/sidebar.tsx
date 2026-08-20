@@ -138,7 +138,7 @@ export function Sidebar({
   linkChats?: boolean;
   activeRunId?: string;
   activeConversationUrl?: string;
-  activeView?: "runs" | "new";
+  activeView?: "runs" | "new" | "project-manager";
 }) {
   const [open, setOpen] = useState<RailSection>(initialSection);
   return (
@@ -146,8 +146,20 @@ export function Sidebar({
       <RailBrand href="/" />
       <div className="rail-sections">
         <Section id="projects" title="Projects" open={open === "projects"} onOpen={setOpen}>
+          <div className="rail-nav">
+            {/* Ember rather than flame: the section's own way in, marked apart
+                from the accent the rest of the product spends on the one thing
+                a screen is asking to be finished. */}
+            <a
+              className="rail-button rail-button-ember"
+              data-active={activeView === "project-manager" || undefined}
+              href="/projects/manager"
+            >
+              Project Manager
+            </a>
+          </div>
           <div className="rail-note">
-            <p>Projects are in progress.</p>
+            <p>The manager is here; projects themselves are still in progress.</p>
             <p>
               A project will hold the timeline and milestones an operator is working
               toward, and the workflow runs and chats that belong to them.

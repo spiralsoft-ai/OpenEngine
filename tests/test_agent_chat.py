@@ -717,10 +717,15 @@ def test_an_unknown_runner_stops_before_anything_is_stored() -> None:
 
 
 def test_shipped_profiles_grant_nothing_they_cannot_honour() -> None:
-    """The foreman's dispatch and workflow-authoring grants go in when the tools
-    do; declaring them now would make every conversation raise."""
+    """The foreman's dispatch grants and the project manager's workflow ones go
+    in when the tools do; declaring them now would make every conversation
+    raise."""
     from engine.runtime import BUILT_IN
 
-    assert set(BUILT_IN) == {AgentId("foreman"), AgentId("coder")}
+    assert set(BUILT_IN) == {
+        AgentId("foreman"),
+        AgentId("coder"),
+        AgentId("project-manager"),
+    }
     assert all(profile.capabilities == () for profile in BUILT_IN.values())
     assert all(profile.instructions.strip() for profile in BUILT_IN.values())

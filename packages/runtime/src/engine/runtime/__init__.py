@@ -27,7 +27,14 @@ from engine.runtime.config import (
     parse_engine_config,
 )
 from engine.runtime.dispatcher import Dispatcher, UnhandledCommandError
-from engine.runtime.profiles import BUILT_IN, CODER, FOREMAN, UnknownAgentError, profile_for
+from engine.runtime.profiles import (
+    BUILT_IN,
+    CODER,
+    FOREMAN,
+    PROJECT_MANAGER,
+    UnknownAgentError,
+    profile_for,
+)
 from engine.runtime.run_read_model import RunReader, WorkflowRunView
 from engine.runtime.session import (
     DEFAULT_RUNNER,
@@ -72,6 +79,7 @@ __all__ = [
     "CODER",
     "DEFAULT_RUNNER",
     "FOREMAN",
+    "PROJECT_MANAGER",
     "AgentSession",
     "ApprovalBroker",
     "ApprovalDecisionNotAllowedError",
