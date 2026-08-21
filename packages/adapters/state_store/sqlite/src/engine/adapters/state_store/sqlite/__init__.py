@@ -915,6 +915,7 @@ def _profile_to_dict(profile: AgentProfile) -> dict[str, object]:
         "capabilities": list(profile.capabilities),
         "model": profile.model,
         "description": profile.description,
+        "read_only": profile.read_only,
     }
 
 
@@ -925,6 +926,7 @@ def _profile_from_dict(value: dict[str, object]) -> AgentProfile:
         capabilities=tuple(str(item) for item in value.get("capabilities", [])),
         model=str(value.get("model", "")),
         description=str(value.get("description", "")),
+        read_only=bool(value.get("read_only", False)),
     )
 
 

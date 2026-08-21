@@ -702,6 +702,66 @@ def test_which_runner_answered_is_recorded() -> None:
     assert asyncio.run(store.agent_run(agent_run_id)).runner == "second"
 
 
+def _reading_session(
+    store: InMemoryStateStore, writer, reader=None
+) -> tuple[AgentSession, AgentId]:
+    """A session offering one provider name, wired twice: with and without
+    the tools to change anything."""
+    missing = object()
+    planner = AgentId("planner")
+    return (
+        AgentSession(
+            Capabilities(
+                workflow_runtime=missing,
+                source_control=missing,
+                agent_runner=writer,
+                communications=missing,
+                workspace_provider=missing,
+                state_store=store,
+            ),
+            profiles={
+                **PROFILES,
+                planner: AgentProfile(
+                    agent_id=planner, instructions="Plan it.", read_only=True
+                ),
+            },
+            runners={"cli": writer},
+            read_only_runners={"cli": reader} if reader is not None else None,
+        ),
+        planner,
+    )
+
+
+def test_an_agent_that_only_reads_is_answered_by_the_runner_that_cannot_write() -> None:
+    """The whole difference between a planner and a coder: same provider, same
+    conversation, and only one of them holding the tools to change the tree."""
+    store = InMemoryStateStore()
+    writer, reader = ScriptedRunner(["written"]), ScriptedRunner(["read"])
+    session, planner = _reading_session(store, writer, reader)
+    planning = asyncio.run(session.start(planner))
+    coding = asyncio.run(session.start(CODER))
+
+    plan = asyncio.run(session.say(planning.instance_id, "how would you", runner="cli"))
+    code = asyncio.run(session.say(coding.instance_id, "do it", runner="cli"))
+
+    assert (plan.message.content, code.message.content) == ("read", "written")
+    assert session.runner_for(planner, "cli") is reader
+    assert session.runner_for(CODER, "cli") is writer
+
+
+def test_a_session_composed_without_read_only_runners_still_answers() -> None:
+    """The restriction is the composition root's to wire. A process that has
+    not is not thereby a process where planning conversations fail."""
+    store = InMemoryStateStore()
+    writer = ScriptedRunner(["written"])
+    session, planner = _reading_session(store, writer)
+    instance = asyncio.run(session.start(planner))
+
+    turn = asyncio.run(session.say(instance.instance_id, "how would you", runner="cli"))
+
+    assert turn.message.content == "written"
+
+
 def test_an_unknown_runner_stops_before_anything_is_stored() -> None:
     store = InMemoryStateStore()
     session = _session(ScriptedRunner(), store)
@@ -721,6 +781,16 @@ def test_shipped_profiles_grant_nothing_they_cannot_honour() -> None:
     do; declaring them now would make every conversation raise."""
     from engine.runtime import BUILT_IN
 
-    assert set(BUILT_IN) == {AgentId("foreman"), AgentId("coder")}
+    assert set(BUILT_IN) == {AgentId("foreman"), AgentId("coder"), AgentId("planner")}
     assert all(profile.capabilities == () for profile in BUILT_IN.values())
     assert all(profile.instructions.strip() for profile in BUILT_IN.values())
+
+
+def test_only_the_planner_ships_unable_to_change_anything() -> None:
+    """What the plan agent is for is stated where the runtime can act on it,
+    not only in the words it is given."""
+    from engine.runtime import BUILT_IN
+
+    assert [
+        agent_id for agent_id, profile in BUILT_IN.items() if profile.read_only
+    ] == [AgentId("planner")]

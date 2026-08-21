@@ -49,7 +49,14 @@ FOREMAN = AgentProfile(
 def test_profile_is_configuration_not_state() -> None:
     """A profile says what an agent is, never what it is currently doing."""
     fields = set(AgentProfile.__dataclass_fields__)
-    assert fields == {"agent_id", "instructions", "capabilities", "model", "description"}
+    assert fields == {
+        "agent_id",
+        "instructions",
+        "capabilities",
+        "model",
+        "description",
+        "read_only",
+    }
 
 
 def test_an_instance_owns_a_conversation_and_may_outlive_many_runs() -> None:

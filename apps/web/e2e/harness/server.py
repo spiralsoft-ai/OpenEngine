@@ -109,12 +109,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     capabilities = build_capabilities(settings)
     runners = build_runners(settings)
+    review_runners = build_review_runners(settings)
     app = create_app(
-        build_session(capabilities, runners, args.repository),
+        build_session(
+            capabilities, runners, args.repository, read_only_runners=review_runners
+        ),
         runners,
         STATIC_DIRECTORY,
         workflow_runners=build_workflow_runners(settings),
-        review_runners=build_review_runners(settings),
+        review_runners=review_runners,
         approval_policy=loaded.config.approvals,
     )
     print(describe_loaded_config(loaded), flush=True)

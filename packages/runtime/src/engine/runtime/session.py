@@ -113,6 +113,7 @@ class AgentSession:
         runners: Mapping[str, AgentRunner] | None = None,
         workspace_repository: str | None = None,
         workspace_base_ref: str = "HEAD",
+        read_only_runners: Mapping[str, AgentRunner] | None = None,
     ) -> None:
         """`runners` lets one process offer a choice of agent runner.
 
@@ -124,6 +125,12 @@ class AgentSession:
         Switching runner mid-conversation is allowed, and is the point: we hold
         the transcript, so whichever one answers next is handed everything that
         came before it, including what the other one did.
+
+        `read_only_runners` is the same choice of provider without the tools to
+        change anything, keyed by the same names, and is what a profile that
+        only reads is answered by. Composed without it, such a profile runs on
+        the runner that was picked and only its instructions hold it -- so a
+        process that wants the restriction wires both maps.
         """
         self._capabilities = capabilities
         self._profiles = profiles
@@ -133,6 +140,7 @@ class AgentSession:
         self._runners: Mapping[str, AgentRunner] = (
             dict(runners) if runners else {DEFAULT_RUNNER: capabilities.agent_runner}
         )
+        self._read_only_runners: Mapping[str, AgentRunner] = dict(read_only_runners or {})
 
     @property
     def profiles(self) -> Mapping[AgentId, AgentProfile]:
@@ -328,12 +336,6 @@ class AgentSession:
         runner_name = runner or self.default_runner
         if runner_name not in self._runners:
             raise UnknownRunnerError(runner_name, self.runners)
-        selected_runner = self._runners[runner_name]
-        interactive: InteractiveAgentRunner | None = None
-        if on_approval is not None:
-            if not isinstance(selected_runner, InteractiveAgentRunner):
-                raise ApprovalsUnsupportedError(runner_name)
-            interactive = selected_runner
         store = self._capabilities.state_store
 
         instance = await store.load_instance(instance_id)
@@ -344,6 +346,15 @@ class AgentSession:
             raise UnknownInstanceError(instance_id)
 
         profile = profile_for(instance.agent_id, self._profiles)
+        # After the profile, because which runner answers depends on it -- and
+        # still before anything is written, so a turn nobody can run leaves the
+        # transcript as it was.
+        selected_runner = self.runner_for(instance.agent_id, runner_name)
+        interactive: InteractiveAgentRunner | None = None
+        if on_approval is not None:
+            if not isinstance(selected_runner, InteractiveAgentRunner):
+                raise ApprovalsUnsupportedError(runner_name)
+            interactive = selected_runner
         tools = self._tools_for(profile)
 
         question = Message.user(text)
@@ -441,6 +452,24 @@ class AgentSession:
             )
         )
         return turn
+
+    def runner_for(self, agent_id: AgentId, runner: str = "") -> AgentRunner:
+        """Which runner answers for this agent, under the name that was picked.
+
+        A profile that only reads is answered by the read-only runner wired
+        under that same name: a planner and a coder are the same provider with
+        a different set of tools, rather than two providers. Public because a
+        caller that runs a turn of its own -- naming a chat, say -- has to get
+        the same answer this does, or the restriction would hold for the
+        conversation and not for everything done around it.
+        """
+        runner_name = runner or self.default_runner
+        if runner_name not in self._runners:
+            raise UnknownRunnerError(runner_name, self.runners)
+        profile = profile_for(agent_id, self._profiles)
+        if profile.read_only and runner_name in self._read_only_runners:
+            return self._read_only_runners[runner_name]
+        return self._runners[runner_name]
 
     def _tools_for(self, profile: AgentProfile) -> tuple[ToolSpec, ...]:
         missing = [grant for grant in profile.capabilities if grant not in self._tools]

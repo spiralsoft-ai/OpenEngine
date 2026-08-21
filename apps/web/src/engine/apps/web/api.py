@@ -57,6 +57,7 @@ from engine.ports import (
     WorkspaceState,
 )
 from engine.runtime import (
+    PLANNER,
     AgentSession,
     ApprovalBroker,
     ApprovalConfig,
@@ -658,7 +659,11 @@ class ThreadService:
             title_context = (
                 (*history, Message.user(opening_text)) if opening_text else history
             )
-            turn = await self._runners[selected_runner].run_turn(
+            # The session's answer rather than the name's, so a chat with an
+            # agent that only reads is named by a runner that only reads too.
+            turn = await self.session.runner_for(
+                thread.agent_id, selected_runner
+            ).run_turn(
                 _new_agent_run_id(),
                 self.session.profiles[thread.agent_id],
                 (*title_context, Message.user(_TITLE_PROMPT)),
@@ -1037,6 +1042,13 @@ def create_app(
                     for name, runner in runners.items()
                 ],
                 "defaultAgent": str(next(iter(sorted(session.profiles)))),
+                # Which agent the Plan button starts a conversation with, named
+                # here rather than in the client so the id stays one thing this
+                # process owns. Empty when no such profile is composed, which is
+                # the client's cue that there is nothing to plan with.
+                "planAgent": (
+                    str(PLANNER.agent_id) if PLANNER.agent_id in session.profiles else ""
+                ),
                 "defaultRunner": session.default_runner,
                 "workflowRunners": list(workflow_executor.runners),
                 "defaultWorkflowRunner": workflow_executor.default_runner,
@@ -1494,6 +1506,7 @@ def create_app(
                 Route("/runs/{run_id}", spa_page),
                 Route("/conversations", spa_page),
                 Route("/conversations/{thread_id}", spa_page),
+                Route("/plan", spa_page),
             ]
         )
         routes.append(Mount("/", BuiltClient(directory=static_directory, html=True)))

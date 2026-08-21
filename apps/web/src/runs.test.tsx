@@ -18,6 +18,7 @@ const config: EngineConfig = {
   agents: [],
   runners: [],
   defaultAgent: "agent",
+  planAgent: "planner",
   defaultRunner: "runner",
   workflowRunners: ["codex"],
   defaultWorkflowRunner: "codex",

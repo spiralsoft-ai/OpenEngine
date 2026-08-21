@@ -45,9 +45,25 @@ CODER = AgentProfile(
     description="Reads and reasons about the code in the working tree.",
 )
 
+PLANNER = AgentProfile(
+    agent_id=AgentId("planner"),
+    instructions=(
+        "You are a planning agent working in a checkout of this repository. Read "
+        "whatever you need to understand the request, then write the plan a coder "
+        "would work from: what to change, where, in what order, and what you are "
+        "unsure of. The plan is the deliverable -- do not change the workspace, "
+        "and say what you would do rather than implying anything has been done."
+    ),
+    capabilities=(),
+    description="Reads the code and writes the plan for a change.",
+    # What actually holds it to reading is the runner it gets, which is why this
+    # is stated here rather than left to the instructions above.
+    read_only=True,
+)
+
 #: Every profile the system knows, by id.
 BUILT_IN: Mapping[AgentId, AgentProfile] = {
-    profile.agent_id: profile for profile in (FOREMAN, CODER)
+    profile.agent_id: profile for profile in (FOREMAN, CODER, PLANNER)
 }
 
 
@@ -67,4 +83,4 @@ def profile_for(agent_id: AgentId, profiles: Mapping[AgentId, AgentProfile] = BU
         raise UnknownAgentError(agent_id, profiles) from None
 
 
-__all__ = ["BUILT_IN", "CODER", "FOREMAN", "UnknownAgentError", "profile_for"]
+__all__ = ["BUILT_IN", "CODER", "FOREMAN", "PLANNER", "UnknownAgentError", "profile_for"]

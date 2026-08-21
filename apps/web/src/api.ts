@@ -28,6 +28,8 @@ export type EngineConfig = {
   agents: AgentOption[];
   runners: RunnerOption[];
   defaultAgent: string;
+  /** The agent the Plan button talks to, empty when none is composed. */
+  planAgent: string;
   defaultRunner: string;
   workflowRunners: string[];
   defaultWorkflowRunner: string;

@@ -39,7 +39,7 @@ def report_wiring(settings: Settings) -> None:
     runners = build_runners(settings)
     review_runners = build_review_runners(settings)
     workflow_runners = build_workflow_runners(settings)
-    session = build_session(capabilities, runners)
+    session = build_session(capabilities, runners, read_only_runners=review_runners)
     print(
         describe_loaded_config(
             LoadedEngineConfig(config=settings.engine_config, path=settings.config_path)
@@ -92,7 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     runners = build_runners(settings)
     review_runners = build_review_runners(settings)
     workflow_runners = build_workflow_runners(settings)
-    session = build_session(capabilities, runners)
+    session = build_session(capabilities, runners, read_only_runners=review_runners)
     app = create_app(
         session,
         runners,

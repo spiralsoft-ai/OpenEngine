@@ -260,12 +260,16 @@ type Route =
   | { kind: "runs" }
   | { kind: "new-run" }
   | { kind: "run"; runId: string }
-  | { kind: "chat"; threadId?: string; runId?: string };
+  /** `plan` is the same chat page, opened on the agent that plans rather than
+   *  on the one that codes -- and always on a new conversation, because a
+   *  button that offered you the last one back would not be a plan. */
+  | { kind: "chat"; threadId?: string; runId?: string; plan?: boolean };
 
 function currentRoute(): Route {
   const path = window.location.pathname.replace(/\/$/, "") || "/";
   if (path === "/" || path === "/runs") return { kind: "runs" };
   if (path === "/runs/new") return { kind: "new-run" };
+  if (path === "/plan") return { kind: "chat", plan: true };
   const workflowConversation = path.match(
     /^\/runs\/([^/]+)\/conversations\/([^/]+)$/,
   );
@@ -285,7 +289,8 @@ function currentRoute(): Route {
 /** Which section of the rail the page on screen came from, so the rail opens
  *  showing where you are. A workflow's own conversation belongs to its run. */
 function sectionFor(route: Route): RailSection {
-  if (route.kind === "chat") return route.runId ? "workflows" : "chats";
+  if (route.kind === "chat")
+    return route.runId ? "workflows" : route.plan ? "projects" : "chats";
   return "workflows";
 }
 
@@ -301,15 +306,19 @@ function App() {
   const [runner, setRunner] = useState("");
   const { runs, error: runsError } = useRuns();
 
+  const plan = route.kind === "chat" && Boolean(route.plan);
+
   useEffect(() => {
     api<EngineConfig>("/api/config")
       .then((value) => {
         setConfig(value);
-        setAgentId(value.defaultAgent);
+        // The plan page is the new chat page with its agent already chosen;
+        // a deployment that composed no planner leaves it on the default.
+        setAgentId((plan && value.planAgent) || value.defaultAgent);
         setRunner(value.defaultRunner);
       })
       .catch((reason: Error) => setError(reason.message));
-  }, []);
+  }, [plan]);
 
   if (error)
     return <main className="state state-fatal">Could not connect to openengine: {error}</main>;
@@ -326,7 +335,9 @@ function App() {
     <EngineRuntimeProvider
       defaults={{ agentId, runner }}
       initialThreadId={chat ? route.threadId : undefined}
-      rememberActiveThread={chat}
+      // The plan page starts a conversation rather than resuming one, so it
+      // neither restores the chat you were last in nor claims to be it.
+      rememberActiveThread={chat && !plan}
     >
       <div className="app-shell">
         <Sidebar

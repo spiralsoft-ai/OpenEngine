@@ -23,6 +23,7 @@ from engine.apps.web.composition import (
     build_capabilities,
     build_review_runners,
     build_runners,
+    build_session,
     build_workflow_runners,
 )
 from engine.domain import (
@@ -68,7 +69,9 @@ from engine.ports import (
     WorkspaceState,
 )
 from engine.runtime import (
+    BUILT_IN,
     INVALID_COMPLETION_ERROR,
+    PLANNER,
     AgentSession,
     ApprovalBroker,
     ApprovalCapability,
@@ -230,6 +233,48 @@ def test_every_workflow_runner_is_reviewed_by_a_read_only_runner_of_its_name() -
         "Glob",
         "Grep",
     ]
+
+
+def test_a_planning_chat_is_answered_by_the_runner_that_cannot_write(tmp_path) -> None:
+    """The Plan button's whole difference from New chat.
+
+    Same provider the user picked, same conversation machinery -- and a set of
+    tools that cannot change the checkout it is reading, which is a property of
+    what the composition hands the planner rather than of its instructions.
+    """
+    settings = Settings(
+        # The policy this repository ships: chat may edit what it is asked to.
+        # A planning conversation is what that permission does not reach.
+        engine_config=EngineConfig(
+            approvals=ApprovalConfig(
+                allow=(ApprovalCapability.READ, ApprovalCapability.EDIT)
+            )
+        ),
+        sqlite_path=str(tmp_path / "conversations.sqlite3"),
+    )
+    capabilities = build_capabilities(settings)
+    try:
+        session = build_session(
+            capabilities,
+            build_runners(settings),
+            read_only_runners=build_review_runners(settings),
+        )
+        planner = session.runner_for(PLANNER.agent_id, "claude")
+        coder = session.runner_for(CODER, "claude")
+    finally:
+        capabilities.state_store.close()
+
+    planner_argv = planner.command_line(PLANNER)
+    coder_argv = coder.command_line(PROFILES[CODER])
+
+    assert planner_argv[planner_argv.index("--allowedTools") + 1 :] == [
+        "Read",
+        "Glob",
+        "Grep",
+    ]
+    assert "Edit" in coder_argv[coder_argv.index("--allowedTools") + 1 :]
+    codex_argv = session.runner_for(PLANNER.agent_id, "codex").command_line(PLANNER)
+    assert codex_argv[codex_argv.index("--sandbox") + 1] == "read-only"
 
 
 def test_review_comments_are_left_with_the_gh_the_composition_names(tmp_path) -> None:
@@ -750,7 +795,10 @@ def _session(runner: ConcurrentRunner) -> AgentSession:
     return _session_with({"test": runner})
 
 
-def _session_with(runners: Mapping[str, ConcurrentRunner]) -> AgentSession:
+def _session_with(
+    runners: Mapping[str, ConcurrentRunner],
+    profiles: Mapping[AgentId, AgentProfile] = PROFILES,
+) -> AgentSession:
     unused = object()
     return AgentSession(
         Capabilities(
@@ -761,7 +809,7 @@ def _session_with(runners: Mapping[str, ConcurrentRunner]) -> AgentSession:
             workspace_provider=unused,
             state_store=InMemoryStateStore(),
         ),
-        profiles=PROFILES,
+        profiles=profiles,
         runners=dict(runners),
     )
 
@@ -2924,6 +2972,26 @@ def test_http_api_creates_lists_and_streams_threads() -> None:
         ("user", "hi"),
         ("assistant", "hello"),
     ]
+
+
+def test_the_config_names_the_agent_the_plan_button_talks_to() -> None:
+    """The client asks which agent plans rather than knowing an id of its own,
+    and is told nothing when a composition has no planner to offer."""
+    runner = ConcurrentRunner()
+    shipped = create_app(_session_with({"test": runner}, BUILT_IN), {"test": runner})
+    coders_only = create_app(_session(runner), {"test": runner})
+
+    async def config(app) -> dict:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return (await client.get("/api/config")).json()
+
+    shipped_config, narrow_config = asyncio.run(config(shipped)), asyncio.run(config(coders_only))
+
+    assert shipped_config["planAgent"] == "planner"
+    assert "planner" in [agent["id"] for agent in shipped_config["agents"]]
+    assert shipped_config["defaultAgent"] == "coder"
+    assert narrow_config["planAgent"] == ""
 
 
 def test_a_chat_keeps_the_runner_it_was_given_for_turns_that_name_none() -> None:

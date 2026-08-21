@@ -140,7 +140,22 @@ describe("Sidebar", () => {
       "/runs/new",
     );
     expect(within(body("Chats")).getByRole("button", { name: "+ New chat" })).toBeInTheDocument();
+    expect(within(body("Projects")).getByRole("link", { name: "Plan" })).toHaveAttribute(
+      "href",
+      "/plan",
+    );
     expect(within(body("Projects")).getByText(/in progress/i)).toBeInTheDocument();
+  });
+
+  /** Planning is a conversation, and the button that starts one is the same
+   *  accented control the other two sections lead with. */
+  it("leads the projects section with the accented plan button", () => {
+    render(<Sidebar runs={[run]} initialSection="projects" />);
+
+    expect(within(body("Projects")).getByRole("link", { name: "Plan" })).toHaveClass(
+      "rail-button",
+      "rail-button-primary",
+    );
   });
 
   it("lists runs with their conversations and marks the one on screen", () => {

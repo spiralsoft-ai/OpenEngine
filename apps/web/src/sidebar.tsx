@@ -146,6 +146,14 @@ export function Sidebar({
       <RailBrand href="/" />
       <div className="rail-sections">
         <Section id="projects" title="Projects" open={open === "projects"} onOpen={setOpen}>
+          {/* A plan is a conversation like any other, so this is the new chat
+              page reached by a link rather than a rail control of its own --
+              what the link settles is which agent answers there. */}
+          <div className="rail-nav">
+            <a className="rail-button rail-button-primary" href="/plan">
+              Plan
+            </a>
+          </div>
           <div className="rail-note">
             <p>Projects are in progress.</p>
             <p>
