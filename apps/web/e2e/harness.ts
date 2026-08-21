@@ -21,6 +21,7 @@ import { test as base, type Page, type TestInfo } from "@playwright/test";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../..");
 const SERVER = path.join(HERE, "harness", "server.py");
+const SEED = path.join(HERE, "harness", "seed.py");
 
 /** How long a composed server may take to answer. Long enough for `uv run` to
  *  resolve the workspace on a cold machine, short enough to fail rather than
@@ -68,12 +69,14 @@ export class Engine {
   }
 }
 
-export const test = base.extend<{ engine: Engine }>({
-  engine: async ({}, use, testInfo) => {
+export const test = base.extend<{ engine: Engine; seededDatabase: boolean }>({
+  seededDatabase: [false, { option: true }],
+  engine: async ({ seededDatabase }, use, testInfo) => {
     const root = mkdtempSync(path.join(tmpdir(), "engine-e2e-"));
     const state = path.join(root, "state");
     mkdirSync(state);
     const { repository, origin } = fixtureRepository(root);
+    if (seededDatabase) seedState(state, repository);
     const scriptPath = path.join(root, "script.json");
     const engine = new Engine(
       `http://127.0.0.1:${await freePort()}`,
@@ -207,6 +210,27 @@ function startServer(
     server.failure = `${command} could not be started: ${error.message}`;
   });
   return server;
+}
+
+/** Populate the test's SQLite file through the production state-store adapter.
+ *
+ *  This runs before the web process opens the database, making the navigation
+ *  spec a genuine cold start over existing state rather than data it created
+ *  through the server it is about to inspect. */
+function seedState(state: string, repository: string): void {
+  const python = process.env.ENGINE_E2E_PYTHON;
+  if (python) {
+    execFileSync(python, [SEED, "--state", state, "--repository", repository], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+    return;
+  }
+  execFileSync(
+    "uv",
+    ["run", "--frozen", "python", SEED, "--state", state, "--repository", repository],
+    { cwd: REPO_ROOT, stdio: "pipe" },
+  );
 }
 
 async function waitUntilServing(url: string, server: Server) {

@@ -127,6 +127,11 @@ unzip it, and point `show-report` at the directory.
   carries the declared `pr_url` -- advances through a review that leaves its
   finding on `gh` to "Action required". Approving there ends it, and a reload
   shows the same finished run: `succeeded`, `approved`, every stage behind it.
+* `persisted-navigation.spec.ts` -- a cold start over a SQLite file populated
+  through the production state-store adapter: the run list, run detail,
+  implementation and review transcripts, and a multi-turn standalone chat are
+  followed through their browser links. It then starts another chat and another
+  workflow in the same database and confirms the older history remains listed.
 
 ## What the rest needs
 
