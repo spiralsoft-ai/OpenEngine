@@ -12,7 +12,6 @@ from engine.domain import (
     AgentRun,
     AgentRunId,
     AgentRunStatus,
-    AgentStepPaused,
     ApprovalId,
     ConversationId,
     HumanReviewCompleted,
@@ -28,7 +27,6 @@ from engine.domain import (
     StepOutput,
     TaskId,
     ToolCall,
-    WorkflowId,
 )
 from engine.ports import StateStore
 
@@ -293,7 +291,6 @@ def test_workflow_run_and_step_conversation_survive_reopening(tmp_path) -> None:
     state = RunState(
         run_id=run_id,
         task_id=TaskId("task-durable"),
-        workflow_id=WorkflowId("durability-test-v1"),
         phase=RunPhase.FAILED,
         repository="acme/api",
         prompt="Fix the race.",
@@ -306,13 +303,8 @@ def test_workflow_run_and_step_conversation_survive_reopening(tmp_path) -> None:
     first = SQLiteStateStore(path)
     asyncio.run(first.save(state))
     named = RunNamed(run_id=run_id, name=state.name)
-    paused = AgentStepPaused(
-        run_id=run_id,
-        step_id=StepId("implementation"),
-        agent_run_id=AgentRunId("implementation-execution"),
-    )
     reactivated = StepReactivated(run_id=run_id, step_id=StepId("implementation"))
-    asyncio.run(first.append_events(run_id, (named, paused, reactivated)))
+    asyncio.run(first.append_events(run_id, (named, reactivated)))
     asyncio.run(
         first.create_instance(
             AgentId("review-agent"),
@@ -335,7 +327,7 @@ def test_workflow_run_and_step_conversation_survive_reopening(tmp_path) -> None:
 
     assert loaded == state
     assert runs == (state,)
-    assert history == (named, paused, reactivated)
+    assert history == (named, reactivated)
     assert instances[0].instance_id == "review-instance"
     assert instances[0].conversation_id == "review-conversation"
     assert instances[0].workflow_run_id == run_id

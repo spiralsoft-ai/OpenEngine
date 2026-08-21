@@ -24,10 +24,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
+from engine.core.workflows.implementation_review import (
+    IMPLEMENTATION_STEP_SPEC,
+    REVIEW_STEP_SPEC,
+    WORKFLOW_BASE_REF,
+)
 from engine.domain import (
-    AgentStep,
     AgentId,
-    AgentInstance,
     AgentInstanceId,
     AgentRunId,
     AgentRunStatus,
@@ -35,6 +38,7 @@ from engine.domain import (
     ApprovalId,
     ApprovalRecord,
     HumanReviewCompleted,
+    IMPLEMENTATION_REVIEW_WORKFLOW_ID,
     Message,
     Role,
     RunId,
@@ -45,7 +49,6 @@ from engine.domain import (
     StepId,
     TaskId,
     WorkflowId,
-    WorkflowDefinition,
     WorkspaceId,
 )
 from engine.ports import (
@@ -67,10 +70,7 @@ from engine.runtime import (
     UserInputNotAllowedError,
     WorkflowExecutionError,
     WorkflowExecutor,
-    WorkflowCatalog,
     WorkflowRunView,
-    load_engine_config,
-    load_workflow_catalog,
 )
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -302,7 +302,6 @@ class ThreadService:
         self,
         session: AgentSession,
         runners: Mapping[str, AgentRunner],
-        workflow_catalog: WorkflowCatalog | None = None,
         approval_policy: ApprovalConfig = ApprovalConfig(),
         *,
         approval_observer: Callable[[ApprovalRecord], Awaitable[None]] | None = None,
@@ -313,7 +312,6 @@ class ThreadService:
         )
         """Public alongside `session`: the same durable boundary, for pauses."""
         self._runners = runners
-        self._workflow_catalog = workflow_catalog
         self._threads: dict[AgentInstanceId, ChatThread] = {}
         self._locks: dict[AgentInstanceId, asyncio.Lock] = {}
         self._active_runs: dict[AgentInstanceId, ActiveRun] = {}
@@ -351,7 +349,7 @@ class ThreadService:
             archived=instance.archived,
             workflow_run_id=instance.workflow_run_id,
             workflow_step_id=instance.workflow_step_id,
-            editable=await self._instance_step_editable(instance),
+            editable=_workflow_step_editable(instance.workflow_step_id),
             auto_approve=instance.auto_approve,
         )
         self._threads[instance.instance_id] = await self._sync_workspace(thread)
@@ -379,12 +377,7 @@ class ThreadService:
             if run is None:
                 raise RuntimeError("workflow run not found")
             repository = run.repository
-            definition = run.workflow_definition
-            if definition is None and self._workflow_catalog is not None:
-                definition = self._workflow_catalog.get(run.workflow_id)
-            base_ref = (
-                definition.workspace.base_ref if definition is not None else None
-            )
+            base_ref = WORKFLOW_BASE_REF
         async with self._locks[instance_id]:
             state = await self.session.attach_workspace(
                 instance_id, repository=repository, base_ref=base_ref
@@ -692,7 +685,10 @@ class ThreadService:
         if archived is not None:
             thread.archived = archived
         if auto_approve is not None:
-            if thread.workflow_step_id is None:
+            if thread.workflow_step_id not in {
+                IMPLEMENTATION_STEP_SPEC.step_id,
+                REVIEW_STEP_SPEC.step_id,
+            }:
                 raise ValueError(
                     "auto-approval is only available for workflow conversations"
                 )
@@ -769,7 +765,7 @@ class ThreadService:
                     archived=instance.archived,
                     workflow_run_id=instance.workflow_run_id,
                     workflow_step_id=instance.workflow_step_id,
-                    editable=await self._instance_step_editable(instance),
+                    editable=_workflow_step_editable(instance.workflow_step_id),
                     auto_approve=instance.auto_approve,
                 )
                 self._threads[instance.instance_id] = await self._sync_workspace(thread)
@@ -780,17 +776,6 @@ class ThreadService:
             await self.approvals.interrupt_orphans()
             self._restored = True
 
-    async def _instance_step_editable(self, instance: AgentInstance) -> bool:
-        if instance.workflow_run_id is None or instance.workflow_step_id is None:
-            return False
-        state = await self.session.state_store.load(instance.workflow_run_id)
-        if state is None:
-            return False
-        definition = state.workflow_definition
-        if definition is None and self._workflow_catalog is not None:
-            definition = self._workflow_catalog.get(state.workflow_id)
-        return _workflow_step_editable(definition, instance.workflow_step_id)
-
 
 def create_app(
     session: AgentSession,
@@ -799,30 +784,19 @@ def create_app(
     *,
     workflow_runners: Mapping[str, AgentRunner] | None = None,
     review_runners: Mapping[str, AgentRunner] | None = None,
-    workflow_catalog: WorkflowCatalog | None = None,
     approval_policy: ApprovalConfig = ApprovalConfig(),
 ) -> Starlette:
     """Build the web application around already-composed capabilities."""
     if workflow_runners is not None and review_runners is None:
         raise ValueError("review_runners are required with workflow_runners")
-    if workflow_catalog is None:
-        loaded_config = load_engine_config()
-        catalog = (
-            load_workflow_catalog(loaded_config.workflows_directory)
-            if loaded_config.workflows_directory is not None
-            else WorkflowCatalog.from_definitions(())
-        )
-    else:
-        catalog = workflow_catalog
     approval_feed = ApprovalFeed(session.state_store)
     service = ThreadService(
         session,
         runners,
-        catalog,
         approval_policy,
         approval_observer=approval_feed.publish,
     )
-    run_reader = RunReader(session.state_store, catalog)
+    run_reader = RunReader(session.state_store)
 
     async def approval_presented(_approval: ApprovalRecord) -> None:
         # The broker's observer publishes every persisted transition. This
@@ -856,7 +830,6 @@ def create_app(
         workflow_runners if workflow_runners is not None else runners,
         review_runners=review_runners if review_runners is not None else runners,
         approval_handler=workflow_approval_handler,
-        catalog=catalog,
     )
     workflow_tasks: dict[RunId, asyncio.Task[None]] = {}
 
@@ -868,54 +841,40 @@ def create_app(
             else None
         )
 
-    async def restore_agent_steps() -> None:
-        """Restart agent commands whose process-local dispatch was lost."""
+    async def restore_reviews() -> None:
+        """Restart review commands whose process-local dispatch was lost."""
         for state in await session.state_store.list_runs():
-            if (
-                state.phase is not RunPhase.RUNNING_AGENT
-                or state.agent_paused
-                or state.run_id in workflow_tasks
-            ):
+            if state.phase is not RunPhase.REVIEWING or state.run_id in workflow_tasks:
                 continue
             instances = await session.state_store.list_instances(
                 workflow_run_id=state.run_id
             )
-            current = next(
+            implementation_step_id = (
+                state.step_results[-1].step_id if state.step_results else None
+            )
+            implementation = next(
                 (
                     instance
                     for instance in instances
-                    if instance.workflow_step_id == state.current_step_id
+                    if instance.workflow_step_id == implementation_step_id
                 ),
                 None,
             )
-            previous = next(
-                (
-                    instance
-                    for instance in instances
-                    if instance.runner
-                ),
-                None,
-            )
-            fallback_runner = (
-                current.runner
-                if current is not None and current.runner
-                else previous.runner
-                if previous is not None
+            runner_name = (
+                implementation.runner
+                if implementation is not None and implementation.runner
                 else workflow_executor.default_runner
             )
-            runner_name = state.runner_name or fallback_runner
             track_workflow(
                 state.run_id,
                 asyncio.create_task(
-                    workflow_executor.resume_agent_step(
-                        state.run_id, runner_name=runner_name
-                    )
+                    workflow_executor.resume_review(state.run_id, runner_name)
                 ),
             )
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        await restore_agent_steps()
+        await restore_reviews()
         try:
             yield
         finally:
@@ -938,7 +897,7 @@ def create_app(
         state = await session.state_store.load(thread.workflow_run_id)
         if (
             state is None
-            or state.phase is not RunPhase.RUNNING_AGENT
+            or state.phase is not RunPhase.IMPLEMENTING
             or state.current_step_id != thread.workflow_step_id
         ):
             raise RuntimeError("this workflow step is no longer active")
@@ -948,10 +907,6 @@ def create_app(
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        assert thread.workflow_step_id is not None
-        await workflow_executor.pause_agent_step(
-            thread.workflow_run_id, thread.workflow_step_id
-        )
 
     async def continue_workflow(thread: ChatThread, text: str) -> None:
         """Interrupt, append a human message, and resume the same workflow step."""
@@ -970,19 +925,9 @@ def create_app(
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        if (
-            state.phase is RunPhase.RUNNING_AGENT
-            and state.current_step_id == thread.workflow_step_id
-        ):
-            await workflow_executor.pause_agent_step(
-                thread.workflow_run_id, thread.workflow_step_id
-            )
         task = asyncio.create_task(
-            workflow_executor.resume_agent_step(
-                thread.workflow_run_id,
-                text,
-                thread.runner,
-                step_id=thread.workflow_step_id,
+            workflow_executor.resume_implementation(
+                thread.workflow_run_id, text, thread.runner
             )
         )
         track_workflow(thread.workflow_run_id, task)
@@ -1040,14 +985,6 @@ def create_app(
                 "defaultRunner": session.default_runner,
                 "workflowRunners": list(workflow_executor.runners),
                 "defaultWorkflowRunner": workflow_executor.default_runner,
-                "workflows": [
-                    {
-                        "id": str(definition.workflow_id),
-                        "name": definition.name,
-                        "version": definition.version,
-                    }
-                    for definition in catalog
-                ],
             }
         )
 
@@ -1068,8 +1005,7 @@ def create_app(
             workflow_id = WorkflowId(_required_string(body, "workflowId"))
         except ValueError as error:
             return _error(str(error), 400)
-        definition = catalog.get(workflow_id)
-        if definition is None:
+        if workflow_id != IMPLEMENTATION_REVIEW_WORKFLOW_ID:
             return _error(f"unknown workflow definition: {workflow_id}", 400)
         runner_name = str(body.get("runner") or workflow_executor.default_runner)
         if runner_name not in workflow_executor.runners:
@@ -1090,14 +1026,13 @@ def create_app(
             workflow_id=workflow_id,
             prompt=prompt,
             repository=repository,
-            workflow_definition=definition,
         )
         await session.state_store.save(state)
         await session.state_store.append_events(run_id, (event,))
         track_workflow(
             run_id,
             asyncio.create_task(
-                workflow_executor.start(event, runner_name)
+                workflow_executor.advance_through_review(event, runner_name)
             ),
         )
         run = await run_reader.get(run_id)
@@ -1105,18 +1040,9 @@ def create_app(
         return JSONResponse(_run_json(run), status_code=201)
 
     async def get_run(request: Request) -> JSONResponse:
-        run_id = RunId(request.path_params["run_id"])
-        run = await run_reader.get(run_id)
+        run = await run_reader.get(RunId(request.path_params["run_id"]))
         if run is None:
             return _error("run not found", 404)
-        task = workflow_tasks.get(run_id)
-        if run.terminal_outcome is not None and task is not None and not task.done():
-            # A terminal MCP result is persisted before its acknowledgement is
-            # sent. Do not expose the terminal snapshot until that final piece
-            # of the runner protocol has completed too.
-            await asyncio.shield(task)
-            run = await run_reader.get(run_id)
-            assert run is not None
         return JSONResponse(_run_json(run))
 
     async def complete_human_review(request: Request) -> JSONResponse:
@@ -1135,7 +1061,7 @@ def create_app(
             return _error("run is not awaiting human review", 409)
         summary = str(body.get("summary", "")).strip()
         try:
-            next_state = await workflow_executor.complete_human_review(
+            await workflow_executor.complete_human_review(
                 HumanReviewCompleted(
                     run_id=run_id,
                     step_id=state.current_step_id,
@@ -1143,13 +1069,6 @@ def create_app(
                     summary=summary,
                 )
             )
-            if next_state.phase is RunPhase.RUNNING_AGENT:
-                track_workflow(
-                    run_id,
-                    asyncio.create_task(
-                        workflow_executor.resume_agent_step(run_id)
-                    ),
-                )
         except WorkflowExecutionError as error:
             return _error(str(error), 409)
         run = await run_reader.get(run_id)
@@ -1310,10 +1229,7 @@ def create_app(
         # Workflow steps share one checkout. An earlier conversation may be
         # idle while a later step is still using that same directory.
         if workflow_is_active(thread):
-            assert thread.workflow_run_id is not None
-            state = await session.state_store.load(thread.workflow_run_id)
-            if state is None or state.phase is RunPhase.RUNNING_AGENT:
-                return _error("this workflow has a run in progress", 409)
+            return _error("this workflow has a run in progress", 409)
         try:
             thread = await service.detach_workspace(instance_id)
         except RuntimeError as error:
@@ -1532,19 +1448,21 @@ def _thread_json(thread: ChatThread) -> dict[str, object]:
     if thread.workflow_step_id is not None:
         result["workflowStepId"] = str(thread.workflow_step_id)
         result["editable"] = thread.editable
-        result["autoApprove"] = thread.auto_approve
+        if thread.workflow_step_id in {
+            IMPLEMENTATION_STEP_SPEC.step_id,
+            REVIEW_STEP_SPEC.step_id,
+        }:
+            result["autoApprove"] = thread.auto_approve
     return result
 
 
-def _workflow_step_editable(
-    definition: WorkflowDefinition | None, step_id: StepId | None
-) -> bool:
-    """Resolve UI behavior from the run's compiled workflow snapshot."""
+def _workflow_step_editable(step_id: StepId | None) -> bool:
+    """Resolve UI behavior from the built-in workflow's step configuration."""
 
-    if definition is None or step_id is None:
-        return False
-    step = definition.step(step_id)
-    return isinstance(step, AgentStep) and step.editable
+    return any(
+        step.step_id == step_id and step.editable
+        for step in (IMPLEMENTATION_STEP_SPEC, REVIEW_STEP_SPEC)
+    )
 
 
 def _run_json(run: WorkflowRunView) -> dict[str, object]:

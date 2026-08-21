@@ -207,26 +207,12 @@ jobs:
             exit 1
           fi
           /tmp/bare/bin/python -c "
-          import openengine as oe
           from engine.core import decide
           from engine.domain import RunId, RunRequested, RunState, TaskId
-          worker = oe.agent(id='worker', instructions='work')
-          workflow = oe.workflow(
-              id='test-v1', name='Test', version='v1',
-              steps=[oe.agent_step(
-                  id='work', name='Work', agent=worker,
-                  prompt=oe.template('work'),
-                  transitions={'*': oe.succeed()},
-              )],
-          )
           run, task = RunId('r'), TaskId('t')
           _, commands = decide(
-              RunState(run_id=run, task_id=task, workflow_id=workflow.workflow_id),
-              RunRequested(
-                  run_id=run, task_id=task, prompt='p', repository='acme/api',
-                  workflow_id=workflow.workflow_id,
-              ),
-              workflow,
+              RunState(run_id=run, task_id=task),
+              RunRequested(run_id=run, task_id=task, prompt='p', repository='acme/api'),
           )
           assert commands, 'engine emitted no command'
           print('core decided:', commands[0].__class__.__name__)

@@ -10,6 +10,7 @@ Placeholder set for Ticket 1; the real vocabulary lands with the engine itself.
 from dataclasses import dataclass, field
 
 from engine.domain.ids import (
+    IMPLEMENTATION_REVIEW_WORKFLOW_ID,
     AgentRunId,
     RunId,
     StepId,
@@ -34,7 +35,7 @@ class RunRequested(Event):
     task_id: TaskId
     prompt: str
     repository: str
-    workflow_id: WorkflowId
+    workflow_id: WorkflowId = IMPLEMENTATION_REVIEW_WORKFLOW_ID
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,14 +77,6 @@ class StepCompleted(Event):
 
 
 @dataclass(frozen=True, slots=True)
-class AgentStepPaused(Event):
-    """An agent step stopped intentionally and must wait for a human message."""
-
-    step_id: StepId
-    agent_run_id: AgentRunId
-
-
-@dataclass(frozen=True, slots=True)
 class StepReactivated(Event):
     """A human message reopened a previously closed workflow step."""
 
@@ -118,7 +111,6 @@ class RunFailed(Event):
 
 
 __all__ = [
-    "AgentStepPaused",
     "AgentRunCompleted",
     "ChangesPublished",
     "Event",

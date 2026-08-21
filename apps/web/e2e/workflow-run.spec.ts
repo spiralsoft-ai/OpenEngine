@@ -106,7 +106,7 @@ for (const runner of ["codex", "claude"]) {
 
     // Provisioning: the run leaves the queue, the workspace stage is behind it,
     // and the checkout it names is a directory that exists.
-    await expect(page.locator(".detail-title .chip")).toHaveText("Implementation");
+    await expect(page.locator(".detail-title .chip")).toHaveText("implementing");
     await expect(page.locator(".stages .stage").first()).toHaveAttribute(
       "data-status",
       "completed",
@@ -140,7 +140,7 @@ for (const runner of ["codex", "claude"]) {
     // ran on the reviewer, and the run stops where a person has to decide.
     await page.goto(runUrl);
     await expect(page.locator(".detail-title .chip")).toHaveText(
-      "Human review",
+      "awaiting human review",
     );
     await expect(step(page, "Implementation").locator(".step-outputs")).toContainText(
       PULL_REQUEST,

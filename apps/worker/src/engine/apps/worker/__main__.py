@@ -9,13 +9,7 @@ import sys
 from collections.abc import Sequence
 
 from engine.apps.worker.composition import Settings, build_capabilities, build_dispatcher
-from engine.runtime import (
-    EngineConfigError,
-    WorkflowLoadError,
-    describe_loaded_config,
-    load_engine_config,
-    load_workflow_catalog,
-)
+from engine.runtime import EngineConfigError, describe_loaded_config, load_engine_config
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -24,9 +18,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         loaded = load_engine_config(args.config)
-        if loaded.workflows_directory is not None:
-            load_workflow_catalog(loaded.workflows_directory)
-    except (EngineConfigError, WorkflowLoadError) as error:
+    except EngineConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
     settings = Settings(engine_config=loaded.config, config_path=loaded.path)

@@ -10,7 +10,6 @@ import {
   phaseLabel,
   RunDetailPage,
   RunsPage,
-  runStatusLabel,
   useRuns,
 } from "./runs";
 
@@ -21,24 +20,20 @@ const config: EngineConfig = {
   defaultRunner: "runner",
   workflowRunners: ["codex"],
   defaultWorkflowRunner: "codex",
-  workflows: [
-    { id: "work-v1", name: "Work", version: "v1" },
-    { id: "release-v2", name: "Release", version: "v2" },
-  ],
 };
 
 function run(overrides: Partial<ApiWorkflowRun> = {}): ApiWorkflowRun {
   return {
     runId: "run-1",
     name: "First run",
-    workflowId: "work-v1",
-    workflowName: "Work",
+    workflowId: "implementation-review-v1",
+    workflowName: "Implementation review",
     workflowVersion: "v1",
     taskId: "task-1",
     taskPrompt: "Do the work",
     repository: ".",
     repositoryContext: { repository: "." },
-    phase: "running_agent",
+    phase: "implementing",
     currentStepId: "implement",
     terminalOutcome: null,
     failureReason: "",
@@ -111,30 +106,16 @@ describe("run display helpers", () => {
     expect(phaseAccent("failed")).toBe("flame");
     expect(phaseAccent("pending")).toBe("quiet");
     expect(phaseAccent("preparing_workspace")).toBe("quiet");
-    expect(phaseAccent("running_agent")).toBeUndefined();
+    expect(phaseAccent("implementing")).toBeUndefined();
   });
 
   it("counts only steps with conversations", () => {
     expect(conversationCount(run())).toBe(1);
     expect(conversationCount(run({ steps: [] }))).toBe(0);
   });
-
-  it("labels active runs with their current workflow step", () => {
-    expect(runStatusLabel(run())).toBe("Implementation");
-    expect(runStatusLabel(run({ phase: "succeeded" }))).toBe("succeeded");
-  });
 });
 
 describe("NewWorkflowPage", () => {
-  it("offers every configured workflow definition", () => {
-    render(<NewWorkflowPage config={config} />);
-
-    const selector = screen.getByRole("combobox", { name: "Workflow definition" });
-    expect(within(selector).getByRole("option", { name: "Release · v2" })).toHaveValue(
-      "release-v2",
-    );
-  });
-
   it("restores a prompt after unmounting and remounting", async () => {
     vi.stubGlobal("fetch", stubPageApi());
     const user = userEvent.setup();
@@ -219,7 +200,7 @@ describe("useRuns", () => {
 
     await act(async () => vi.advanceTimersByTimeAsync(1000));
 
-    expect(result.current.runs[0].phase).toBe("running_agent");
+    expect(result.current.runs[0].phase).toBe("implementing");
     expect(result.current.runs[0].steps[0].waiting).toBe(true);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -280,10 +261,10 @@ describe("RunsPage", () => {
     expect(firstCard).not.toBeNull();
     expect(within(firstCard as HTMLElement).getByText("2")).toBeInTheDocument();
     expect(within(firstCard as HTMLElement).getByText("1")).toBeInTheDocument();
-    expect(within(firstCard as HTMLElement).getAllByText("Implementation")).toHaveLength(2);
+    expect(within(firstCard as HTMLElement).getByText("Implementation")).toBeInTheDocument();
 
     const filters = screen.getByRole("group", { name: "Filter runs by phase" });
-    expect(within(filters).getByRole("button", { name: "running agent" })).toBeInTheDocument();
+    expect(within(filters).getByRole("button", { name: "implementing" })).toBeInTheDocument();
     expect(within(filters).getByRole("button", { name: "failed" })).toBeInTheDocument();
     expect(within(filters).queryByRole("button", { name: "pending" })).not.toBeInTheDocument();
 
@@ -294,40 +275,6 @@ describe("RunsPage", () => {
 });
 
 describe("RunDetailPage", () => {
-  it("renders steps from an arbitrary workflow definition", async () => {
-    const generic = run({
-      workflowId: "release-v2",
-      workflowName: "Release",
-      workflowVersion: "v2",
-      phase: "succeeded",
-      currentStepId: "publish",
-      terminalOutcome: "succeeded",
-      steps: [
-        {
-          ...run().steps[0],
-          stepId: "prepare",
-          name: "Prepare release",
-          status: "completed",
-          summary: "Prepared artifacts.",
-        },
-        {
-          ...run().steps[1],
-          stepId: "publish",
-          name: "Publish release",
-          status: "completed",
-          outcome: "approved",
-        },
-      ],
-    });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(generic)));
-
-    render(<RunDetailPage runId="run-1" />);
-
-    expect(await screen.findByRole("heading", { name: "Prepare release" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Publish release" })).toBeVisible();
-    expect(screen.getByText("Prepared artifacts.")).toBeVisible();
-  });
-
   it("ends the run with the decision it stopped for", async () => {
     const completed = run().steps.map((step) => ({ ...step, status: "completed" }));
     const awaiting = run({

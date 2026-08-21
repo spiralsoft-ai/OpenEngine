@@ -23,7 +23,6 @@ from engine.runtime.config import (
     EngineConfig,
     EngineConfigError,
     LoadedEngineConfig,
-    WorkflowsConfig,
     describe_loaded_config,
     load_engine_config,
     parse_engine_config,
@@ -65,11 +64,6 @@ from engine.runtime.terminal_mcp import (
     TerminalResultRegistry,
 )
 from engine.runtime.workflow_execution import WorkflowExecutionError, WorkflowExecutor
-from engine.runtime.workflows import (
-    WorkflowCatalog,
-    WorkflowLoadError,
-    load_workflow_catalog,
-)
 
 __all__ = [
     "INTERRUPTED_TOOL_RESULT",
@@ -95,7 +89,6 @@ __all__ = [
     "EngineConfigError",
     "InvalidStepResultError",
     "LoadedEngineConfig",
-    "WorkflowsConfig",
     "PolicyDecision",
     "RunReader",
     "TerminalMcpBroker",
@@ -112,8 +105,6 @@ __all__ = [
     "WorkflowRunView",
     "WorkflowExecutionError",
     "WorkflowExecutor",
-    "WorkflowCatalog",
-    "WorkflowLoadError",
     "complete_step_tool",
     "describe_loaded_config",
     "fail_step_tool",
@@ -122,7 +113,6 @@ __all__ = [
     "policy_decision_for",
     "profile_for",
     "load_engine_config",
-    "load_workflow_catalog",
     "parse_engine_config",
     "session_grant_from",
     "run_failed_from_tool_call",

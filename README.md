@@ -37,22 +37,7 @@ uv run engine-control-server --config ./engine.toml
 neither is set, Engine reads `./engine.toml` when it exists, otherwise it uses
 built-in defaults. Configurations are not merged.
 
-Repository-owned workflows are selected with a directory relative to the
-configuration file:
-
-```toml
-[workflows]
-directory = "workflows"
-```
-
-Each non-private Python file in that directory imports `openengine` and exports
-one immutable value named `workflow`. Definitions may form finite sequential or
-branching graphs; cycles and parallel steps are intentionally unsupported in
-the v1 DSL. Workflow files are trusted configuration and execute once during
-startup. A compiled definition is snapshotted onto every run so editing or
-removing a file does not change an in-flight run.
-
-Engine also supports agent attribution and provider-neutral approval policy:
+Engine supports agent attribution and provider-neutral approval policy:
 
 ```toml
 attribution = false

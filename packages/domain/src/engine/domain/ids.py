@@ -24,6 +24,11 @@ StepId = NewType("StepId", str)
 WorkflowId = NewType("WorkflowId", str)
 """A versioned workflow definition."""
 
+# The domain event needs a dependency-safe default: the domain package cannot
+# import the engine package that implements the workflow.  The workflow module
+# aliases this value as its public WORKFLOW_ID.
+IMPLEMENTATION_REVIEW_WORKFLOW_ID = WorkflowId("implementation-review-v1")
+
 RunId = NewType("RunId", str)
 """One end-to-end execution of a `TaskId`."""
 
@@ -73,4 +78,5 @@ __all__ = [
     "TaskId",
     "WorkflowId",
     "WorkspaceId",
+    "IMPLEMENTATION_REVIEW_WORKFLOW_ID",
 ]

@@ -15,7 +15,7 @@ import { useState, type ReactNode } from "react";
 
 import type { ApiWorkflowRun } from "./api";
 import { RailBrand, RailFoot } from "./brand";
-import { conversationCount, IN_PROGRESS_PHASES, runStatusLabel } from "./runs";
+import { conversationCount, IN_PROGRESS_PHASES, phaseLabel } from "./runs";
 
 export type RailSection = "projects" | "workflows" | "chats";
 
@@ -184,7 +184,7 @@ export function Sidebar({
                       {IN_PROGRESS_PHASES.has(run.phase) && (
                         <span className="rail-live" aria-label="Workflow is in progress" />
                       )}
-                      {runStatusLabel(run)} · {run.workflowVersion || run.workflowId}
+                      {phaseLabel(run.phase)} · {run.workflowVersion || run.workflowId}
                     </span>
                   </a>
                 </div>
