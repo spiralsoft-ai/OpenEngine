@@ -91,6 +91,21 @@ export type ApiWorkflowRun = {
   } | null;
 };
 
+/** Answer the decision a run has stopped for, and get the finished run back.
+ *
+ *  Both answers are terminal — approving succeeds the run, rejecting fails it —
+ *  so the response is the last state there is, and nothing is left to poll. */
+export function completeHumanReview(
+  runId: string,
+  approved: boolean,
+  summary: string,
+): Promise<ApiWorkflowRun> {
+  return api<ApiWorkflowRun>(`/api/runs/${encodeURIComponent(runId)}/human-review`, {
+    method: "POST",
+    body: JSON.stringify({ approved, summary }),
+  });
+}
+
 /** Choose the runner that answers this conversation from now on. */
 export function setThreadRunner(threadId: string, runner: string): Promise<ApiThread> {
   return api<ApiThread>(`/api/threads/${threadId}`, {

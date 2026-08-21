@@ -275,6 +275,90 @@ describe("RunsPage", () => {
 });
 
 describe("RunDetailPage", () => {
+  const awaiting = run({
+    phase: "awaiting_human_review",
+    currentStepId: "review",
+    steps: run().steps.map((step, index) => ({
+      ...step,
+      status: index ? "action_required" : "completed",
+    })),
+    pendingHumanReview: {
+      stepId: "review",
+      title: "Review implementation for task-1",
+      summary: "Added the greeting.",
+    },
+  });
+
+  it("records a human approval and shows the decision it caused", async () => {
+    const approved = run({
+      phase: "succeeded",
+      currentStepId: null,
+      terminalOutcome: "approved",
+      steps: run().steps.map((step) => ({ ...step, status: "completed" })),
+      humanDecision: {
+        stepId: "review",
+        approved: true,
+        outcome: "approved",
+        summary: "Ship it",
+      },
+    });
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/runs/run-1/human-review" && init?.method === "POST")
+        return json(approved);
+      if (path === "/api/runs/run-1") return json(awaiting);
+      return json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+
+    render(<RunDetailPage runId="run-1" />);
+    await user.type(
+      await screen.findByRole("textbox", { name: "Decision note" }),
+      "Ship it",
+    );
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("Final human decision")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "approved" })).toBeVisible();
+    expect(screen.getByText("Ship it")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/human-review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ approved: true, summary: "Ship it" }),
+      }),
+    );
+  });
+
+  it("offers rejection, and keeps the decision open when it is refused", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/runs/run-1/human-review" && init?.method === "POST")
+        return json({ error: "run is not awaiting human review" }, { status: 409 });
+      if (path === "/api/runs/run-1") return json(awaiting);
+      return json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+
+    render(<RunDetailPage runId="run-1" />);
+    await user.click(await screen.findByRole("button", { name: "Reject" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "run is not awaiting human review",
+    );
+    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/human-review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ approved: false, summary: "" }),
+      }),
+    );
+  });
+
   it("offers the workflow checkout's detach operation", async () => {
     const terminal = run({
       phase: "succeeded",

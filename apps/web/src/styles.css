@@ -907,6 +907,23 @@ select:disabled { cursor: default; }
 .callout-action .eyebrow { color: var(--flame); }
 .callout-rejected { border-left-color: var(--flame-deep); }
 
+.decision { display: grid; gap: 14px; margin-top: 18px; }
+.decision label { display: grid; gap: 9px; font-size: 14px; }
+.decision label > span { color: var(--ink-soft); font-weight: 600; }
+.decision textarea {
+  width: 100%;
+  padding: 13px 14px;
+  background: var(--white);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.decision textarea:focus { border-color: var(--ink); outline: 0; }
+.decision-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
 .timeline { display: grid; gap: 0; padding: 30px var(--gutter) 56px; }
 .step {
   display: grid;

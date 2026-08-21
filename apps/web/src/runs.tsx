@@ -1,6 +1,12 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-import { api, type ApiRunStep, type ApiWorkflowRun, type EngineConfig } from "./api";
+import {
+  api,
+  completeHumanReview,
+  type ApiRunStep,
+  type ApiWorkflowRun,
+  type EngineConfig,
+} from "./api";
 import { Stat, StatStrip } from "./brand";
 import { WorkspaceControl } from "./workspace";
 
@@ -361,6 +367,77 @@ function StepCard({ step, current }: { step: ApiRunStep; current: boolean }) {
   );
 }
 
+/** The one transition in a run that no agent can make.
+ *
+ *  Everything before this the runtime drives on its own; here it stops and
+ *  waits, and until something in the browser could answer, a run reached its
+ *  last screen and stayed there. The note is optional because a decision is not:
+ *  refusing to record an approval for want of an explanation would leave the run
+ *  exactly as stuck as having no button at all. */
+function HumanReviewDecision({
+  runId,
+  onDecided,
+}: {
+  runId: string;
+  onDecided: (run: ApiWorkflowRun) => void;
+}) {
+  const [summary, setSummary] = useState("");
+  const [deciding, setDeciding] = useState<"approve" | "reject">();
+  const [error, setError] = useState("");
+
+  async function decide(approved: boolean) {
+    setDeciding(approved ? "approve" : "reject");
+    setError("");
+    try {
+      // The finished run comes back with the decision, so the page shows the
+      // outcome it just caused rather than the one it goes looking for.
+      onDecided(await completeHumanReview(runId, approved, summary));
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Could not record the decision",
+      );
+      setDeciding(undefined);
+    }
+  }
+
+  return (
+    <div className="decision">
+      <label>
+        <span>Decision note</span>
+        <textarea
+          rows={3}
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          placeholder="Optional — what made this the call, for whoever reads the run later."
+        />
+      </label>
+      {error && (
+        <p className="notice" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="decision-actions">
+        <button
+          className="btn btn-primary"
+          type="button"
+          disabled={deciding !== undefined}
+          onClick={() => void decide(true)}
+        >
+          {deciding === "approve" ? "Approving…" : "Approve"}
+        </button>
+        <button
+          className="btn"
+          type="button"
+          disabled={deciding !== undefined}
+          onClick={() => void decide(false)}
+        >
+          {deciding === "reject" ? "Rejecting…" : "Reject"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function RunDetailPage({ runId }: { runId: string }) {
   const [run, setRun] = useState<ApiWorkflowRun>();
   const [error, setError] = useState("");
@@ -441,6 +518,13 @@ export function RunDetailPage({ runId }: { runId: string }) {
                 The implementation and agent review are complete. A human approval or rejection
                 is the final decision.
               </p>
+              {/* Keyed by the run, so a note typed for one is never carried
+                  into another's decision by navigating between them. */}
+              <HumanReviewDecision
+                key={run.runId}
+                runId={run.runId}
+                onDecided={setRun}
+              />
             </section>
           )}
           {run.humanDecision && (

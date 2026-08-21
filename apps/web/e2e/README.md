@@ -120,18 +120,19 @@ unzip it, and point `show-report` at the directory.
   it is still running, the approval it pauses on reaches the browser, approving
   it is recorded as an approval, the turn carries on, and the file the command
   was allowed to write exists in that chat's worktree.
-* `workflow-run.spec.ts` -- a workflow run on each runner: the run is created
-  from the form, provisions a checkout that exists on disk, streams the
-  implementation's first message and its command into the step's conversation
-  *while the step is still running*, and -- once `complete_step` carries the
-  declared `pr_url` -- advances through a review that leaves its finding on
-  `gh` to "Action required".
+* `workflow-run.spec.ts` -- a workflow run on each runner, end to end: the run
+  is created from the form, provisions a checkout that exists on disk, streams
+  the implementation's first message and its command into the step's
+  conversation *while the step is still running*, and -- once `complete_step`
+  carries the declared `pr_url` -- advances through a review that leaves its
+  finding on `gh` to "Action required". Approving there finishes the run:
+  `succeeded`, `approved`, every stage behind it, and still so after a reload.
 
 ## What the rest needs
 
 The behaviours below are the ones we want next. Each names what has to exist
-before it can be written; nothing here is a change to the product, except where
-it says so.
+before it can be written; what is left is harness work rather than a change to
+the product.
 
 ### Workflow runs
 
@@ -142,10 +143,6 @@ it says so.
 2. **Plans.** Only Claude produces `plan_approval` today (`ExitPlanMode`); Codex
    has no app-server equivalent, so that test is Claude-only until it does.
    *New script step: `{"type": "plan", "plan": "…"}`.*
-3. **A human decision has no button.** `POST /api/runs/{id}/human-review` exists
-   and the run page shows "Action required", but nothing in the client calls it.
-   A test that drives a run to its end through the browser needs that control to
-   exist first. *A product change, not a test one.*
 
 ### The behaviours, once those exist
 
@@ -158,7 +155,7 @@ it says so.
 | auto-approve runs several requests unattended | — | toggle in the conversation header; script several `run` steps and assert `decisionSource` is not `user` |
 | a failed workflow reads as failed | — | `fail_step`, and a CLI that exits nonzero -- they surface differently |
 | a plan reaches the operator | 2 | Claude only |
-| the human decision finishes the run | 3 | the last transition nothing in the browser can reach |
+| rejecting sends the run back for changes | — | the other half of the decision control; `failed`, `rejected`, and the correction loop after it |
 
 ## Live provider CLIs
 

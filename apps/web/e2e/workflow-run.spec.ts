@@ -8,6 +8,7 @@ import { expect, shot, test, type Script } from "./harness";
 const TASK = "Add a greeting file to the repository.";
 const PULL_REQUEST = "https://github.com/acme/api/pull/7";
 const FINDING = "greeting.txt is not covered by a test.";
+const DECISION = "The finding can wait; the greeting is what was asked for.";
 
 /** What the implementation waits for before writing anything.
  *
@@ -87,8 +88,13 @@ function step(page: Page, name: string) {
     .filter({ has: page.getByRole("heading", { name, exact: true }) });
 }
 
+/** The Final outcome cell of the strip under the run heading. */
+function outcome(page: Page) {
+  return page.locator(".stat").filter({ hasText: "Final outcome" }).locator(".stat-value");
+}
+
 for (const runner of ["codex", "claude"]) {
-  test(`a ${runner} workflow run provisions, streams, and reaches review`, async ({
+  test(`a ${runner} workflow run provisions, streams, reviews, and is approved`, async ({
     page,
     engine,
   }, testInfo) => {
@@ -151,5 +157,31 @@ for (const runner of ["codex", "claude"]) {
     // The reviewer's finding left the process the way a real one would, through
     // `gh` -- which here records rather than comments on somebody's repository.
     expect(readFileSync(engine.ghLog, "utf-8")).toContain(FINDING);
+
+    // The decision. Everything above this the runtime drives on its own; this
+    // is the one transition no agent can make, so the browser is the only thing
+    // that can finish the run.
+    const pending = page.locator(".callout-action");
+    await pending.getByLabel("Decision note").fill(DECISION);
+    await pending.getByRole("button", { name: "Approve" }).click();
+
+    await expect(page.locator(".detail-title .chip")).toHaveText("succeeded");
+    await expect(outcome(page)).toHaveText("approved");
+    await expect(page.locator(".callout")).toContainText(DECISION);
+    await shot(page, testInfo, "4 approved");
+
+    // Reloaded, because what matters is that the decision was persisted rather
+    // than that the page it was submitted from redrew itself. Every stage is
+    // behind the run now, the human one included.
+    await page.reload();
+    await expect(page.locator(".detail-title .chip")).toHaveText("succeeded");
+    await expect(outcome(page)).toHaveText("approved");
+    for (const name of ["Implementation", "Review", "Human review"])
+      await expect(step(page, name).locator(".chip")).toHaveText("completed");
+    const stages = page.locator(".stages .stage");
+    await expect(stages).toHaveCount(4);
+    for (let index = 0; index < 4; index += 1)
+      await expect(stages.nth(index)).toHaveAttribute("data-status", "completed");
+    await shot(page, testInfo, "5 approved, reloaded");
   });
 }
