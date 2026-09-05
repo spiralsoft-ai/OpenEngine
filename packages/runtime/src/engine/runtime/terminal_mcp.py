@@ -47,6 +47,10 @@ McpRequestId = str | int
 #: numbers a request with is not anything the conversation contains.
 ToolCallLookup = Callable[[str, str], str | None]
 
+#: Given a line of progress the agent wants a person to see, put it in front of
+#: them. Bound by whoever knows where the run is being watched.
+StatusReporter = Callable[[str], Awaitable[None]]
+
 _SERVER_NAME = "workflow"
 _PROTOCOL_VERSION = "2025-06-18"
 
@@ -139,6 +143,16 @@ class TerminalMcpBroker:
         self._git_approval: ApprovalHandler | None = None
         self._tool_call_ids: ToolCallLookup | None = None
         self._comments_added = 0
+        self._status_reporter: StatusReporter | None = None
+
+    def enable_status_updates(self, report: StatusReporter) -> None:
+        """Serve `update_status`, delivering what it is told to `report`.
+
+        Only bound when the run has somewhere to be reported to. A step whose
+        run was started from the web is not offered the tool at all, rather
+        than offered one whose updates go nowhere.
+        """
+        self._status_reporter = report
 
     def enable_repository_tools(
         self,
@@ -205,6 +219,8 @@ class TerminalMcpBroker:
         )
         for name in self._repository_tools:
             arguments = (*arguments, "--repository-tool", name)
+        if self._status_reporter is not None:
+            arguments = (*arguments, "--status-updates")
         if self._step is None:
             arguments = (*arguments, "--repository-tools-only")
         return McpServerConfig(
@@ -256,6 +272,20 @@ class TerminalMcpBroker:
                 if name not in self._repository_tools:
                     return {"ok": False, "error": f"{name} is not enabled for this step"}
                 return await self._repository_call(name, arguments, request_id)
+            if name == "update_status":
+                if self._status_reporter is None:
+                    return {
+                        "ok": False,
+                        "error": "update_status is not enabled for this step",
+                    }
+                try:
+                    status = _status_argument(arguments)
+                    await self._status_reporter(status)
+                except Exception as error:
+                    # Reporting is not the work. A provider that is down is
+                    # something the step is told about and carries on from.
+                    return {"ok": False, "error": f"could not post the status: {error}"}
+                return {"ok": True, "acknowledgement": "status posted"}
             if self._step is None:
                 # Listed by nobody and served by nobody: a session with no step
                 # says so rather than failing later on a step it does not have.
@@ -269,6 +299,16 @@ class TerminalMcpBroker:
                         "ok": False,
                         "error": "clarify does not accept arguments",
                     }
+                # Reported here rather than with the other two terminal tools,
+                # because this one is not terminal: no event leaves the broker
+                # for the executor to announce, so nothing else would see it.
+                if self._status_reporter is not None:
+                    try:
+                        await self._status_reporter(
+                            "answered a question without changing the work order"
+                        )
+                    except Exception:
+                        pass
                 return {"ok": True, "acknowledgement": "clarified"}
             if name == "complete_step":
                 if "add_comment" in self._repository_tools and not self._comments_added:
@@ -460,7 +500,10 @@ class TerminalMcpBroker:
 
 
 def terminal_tool_names(
-    repository_tools: Sequence[str] = (), *, terminal_tools: bool = True
+    repository_tools: Sequence[str] = (),
+    *,
+    terminal_tools: bool = True,
+    status_updates: bool = False,
 ) -> tuple[str, ...]:
     """The tools a step's server serves, in the order it lists them.
 
@@ -469,20 +512,48 @@ def terminal_tool_names(
     """
     return tuple(
         str(tool["name"])
-        for tool in _tools(repository_tools, terminal_tools=terminal_tools)
+        for tool in _tools(
+            repository_tools,
+            terminal_tools=terminal_tools,
+            status_updates=status_updates,
+        )
     )
 
 
 def _tools(
-    repository_tools: Sequence[str] = (), *, terminal_tools: bool = True
+    repository_tools: Sequence[str] = (),
+    *,
+    terminal_tools: bool = True,
+    status_updates: bool = False,
 ) -> list[dict[str, object]]:
     tools: list[dict[str, object]] = list(_TERMINAL_TOOLS) if terminal_tools else []
+    if status_updates:
+        tools.append(_STATUS_TOOL)
     tools.extend(
         _REPOSITORY_TOOLS[name]
         for name in REPOSITORY_TOOL_NAMES
         if name in repository_tools
     )
     return tools
+
+
+#: Served only when the run has a conversation to report into.
+_STATUS_TOOL: dict[str, object] = {
+    "name": "update_status",
+    "description": (
+        "Tell the person who asked for this work order how it is going. The "
+        "status is posted in the conversation the request came from, so write "
+        "one plain sentence for a reader who cannot see the workspace. Use it "
+        "when something changes that they would want to know about; it does "
+        "not end the step."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {"status": {"type": "string", "minLength": 1}},
+        "required": ["status"],
+        "additionalProperties": False,
+    },
+}
 
 
 #: The tools every step's server serves, whatever it was granted.
@@ -698,6 +769,15 @@ def _pipeline_arguments(name: str, arguments: object) -> tuple[int, int | None]:
     return pipeline_id, job_id
 
 
+def _status_argument(arguments: object) -> str:
+    if not isinstance(arguments, dict) or set(arguments) - {"status"}:
+        raise ValueError("unexpected update_status arguments")
+    status = arguments.get("status")
+    if not isinstance(status, str) or not status.strip():
+        raise ValueError("status must be a non-empty string")
+    return status.strip()
+
+
 def _git_arguments(arguments: object) -> tuple[str, ...]:
     if not isinstance(arguments, dict):
         raise ValueError("git_subcommand arguments must be an object")
@@ -799,6 +879,7 @@ async def _serve_stdio(
     *,
     repository_tools: Sequence[str] = (),
     terminal_tools: bool = True,
+    status_updates: bool = False,
 ) -> None:
     """Serve newline-delimited MCP JSON-RPC without writing logs to stdout."""
     while line := await asyncio.to_thread(sys.stdin.buffer.readline):
@@ -811,6 +892,7 @@ async def _serve_stdio(
                 request,
                 repository_tools=repository_tools,
                 terminal_tools=terminal_tools,
+                status_updates=status_updates,
             )
             if response is None:
                 continue
@@ -832,6 +914,7 @@ async def _mcp_response(
     *,
     repository_tools: Sequence[str] = (),
     terminal_tools: bool = True,
+    status_updates: bool = False,
 ) -> dict[str, object] | None:
     if not isinstance(request, dict):
         return _rpc_error(None, -32600, "Invalid Request")
@@ -860,7 +943,13 @@ async def _mcp_response(
     if method == "tools/list":
         return _rpc_result(
             request_id,
-            {"tools": _tools(repository_tools, terminal_tools=terminal_tools)},
+            {
+                "tools": _tools(
+                    repository_tools,
+                    terminal_tools=terminal_tools,
+                    status_updates=status_updates,
+                )
+            },
         )
     if method != "tools/call":
         return _rpc_error(request_id, -32601, "Method not found")
@@ -936,6 +1025,11 @@ def main() -> None:
         action="store_true",
         help="serve the granted repository tools without the terminal tools",
     )
+    parser.add_argument(
+        "--status-updates",
+        action="store_true",
+        help="serve update_status, for a run with a conversation to report to",
+    )
     args = parser.parse_args()
     asyncio.run(
         _serve_stdio(
@@ -944,6 +1038,7 @@ def main() -> None:
             args.token,
             repository_tools=tuple(args.repository_tools),
             terminal_tools=not args.repository_tools_only,
+            status_updates=args.status_updates,
         )
     )
 
@@ -952,6 +1047,7 @@ __all__ = [
     "DEFAULT_BASE_REF",
     "REPOSITORY_TOOL_METHODS",
     "REPOSITORY_TOOL_NAMES",
+    "StatusReporter",
     "TerminalEvent",
     "TerminalMcpBroker",
     "TerminalResultAlreadySubmittedError",

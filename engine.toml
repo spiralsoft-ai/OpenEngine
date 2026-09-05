@@ -6,6 +6,13 @@ public_url = "https://sheas-mac-mini.taileb7fdb.ts.net"
 provider = "slack"
 channel = "OpenEngine"
 
+# What pinging the bot starts. A mention is a sentence, so the answers the web
+# form collects alongside the prompt come from here instead. See
+# docs/work-orders-from-slack.md for the Slack app side of it.
+[work_orders]
+repository = "OpenEngine/OpenEngine"
+workflow = "implementation-review-v1"
+
 [orchestrator]
 host = "127.0.0.1:7233"
 database = ".engine/temporal.sqlite3"

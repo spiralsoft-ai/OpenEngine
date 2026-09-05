@@ -32,7 +32,9 @@ from engine.runtime.config import (
     load_engine_config,
     parse_engine_config,
 )
+from engine.runtime.config import WorkOrdersConfig
 from engine.runtime.dispatcher import Dispatcher, UnhandledCommandError
+from engine.runtime.notifications import RunNotifier
 from engine.runtime.profiles import (
     BUILT_IN,
     CODER,
@@ -141,8 +143,10 @@ __all__ = [
     "PlanningTools",
     "ProjectPlan",
     "project_chat_capabilities",
+    "RunNotifier",
     "RunReader",
     "TerminalMcpBroker",
+    "WorkOrdersConfig",
     "TerminalResultAlreadySubmittedError",
     "TerminalResultRegistry",
     "UnhandledCommandError",

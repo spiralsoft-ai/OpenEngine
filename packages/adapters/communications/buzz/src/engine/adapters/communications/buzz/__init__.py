@@ -19,7 +19,11 @@ class BuzzCommunications:
         self._api_token = api_token
 
     async def post(
-        self, channel: str, message: str | Message, run_id: RunId | None = None
+        self,
+        channel: str,
+        message: str | Message,
+        run_id: RunId | None = None,
+        thread_id: str = "",
     ) -> str:
         raise NotImplementedError("Buzz delivery lands with the communications ticket")
 

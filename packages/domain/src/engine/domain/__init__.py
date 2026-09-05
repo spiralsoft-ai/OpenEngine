@@ -63,7 +63,7 @@ from engine.domain.planning import (
     project_id_for_instance,
     workstreams_by_milestone,
 )
-from engine.domain.state import RunPhase, RunState
+from engine.domain.state import RunOrigin, RunPhase, RunState
 from engine.domain.scoping import (
     MilestoneScope,
     ScopingPlan,
@@ -136,6 +136,7 @@ __all__ = [
     "RunFailed",
     "RunId",
     "RunNamed",
+    "RunOrigin",
     "RunPhase",
     "RunRequested",
     "RunState",

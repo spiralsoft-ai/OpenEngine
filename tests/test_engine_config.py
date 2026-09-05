@@ -26,6 +26,9 @@ def test_defaults_allow_reads_without_selecting_a_file(tmp_path: Path) -> None:
     assert loaded.config.public_url == ""
     assert loaded.config.communications.provider == "slack"
     assert loaded.config.communications.channel == ""
+    assert loaded.config.work_orders.repository == ""
+    assert loaded.config.work_orders.workflow == ""
+    assert loaded.config.work_orders.runner == ""
     assert loaded.config.orchestrator.host == "127.0.0.1:7233"
     assert loaded.config.orchestrator.database == ".engine/temporal.sqlite3"
     assert loaded.config.orchestrator.health_check_interval == 5.0
@@ -105,6 +108,30 @@ def test_loads_communications_provider(tmp_path: Path) -> None:
 
     assert loaded.config.communications.provider == "buzz"
     assert loaded.config.communications.channel == "engineering"
+
+
+def test_loads_what_a_mention_should_start(tmp_path: Path) -> None:
+    path = tmp_path / "engine.toml"
+    path.write_text(
+        "[work_orders]\n"
+        'repository = "acme/api"\n'
+        'workflow = "implementation-review-v1"\n'
+        'runner = "claude"\n'
+    )
+
+    loaded = load_engine_config(path, environ={}, cwd=tmp_path)
+
+    assert loaded.config.work_orders.repository == "acme/api"
+    assert loaded.config.work_orders.workflow == "implementation-review-v1"
+    assert loaded.config.work_orders.runner == "claude"
+
+
+def test_rejects_an_unknown_work_order_key(tmp_path: Path) -> None:
+    path = tmp_path / "engine.toml"
+    path.write_text('[work_orders]\nrepo = "acme/api"\n')
+
+    with pytest.raises(EngineConfigError, match="unknown key in work_orders: repo"):
+        load_engine_config(path, environ={}, cwd=tmp_path)
 
 
 def test_loads_github_deployment_credentials(tmp_path: Path) -> None:

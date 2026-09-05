@@ -34,6 +34,25 @@ class RunPhase(Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class RunOrigin:
+    """Where a run was asked for, and where its progress is reported back.
+
+    Provider-neutral on purpose. `channel` and `thread_id` are whatever the
+    communications adapter addresses a conversation by -- a Slack channel and
+    the timestamp of the message that started the thread, a Buzz room and a
+    post -- and `author` is whoever asked, in that same vocabulary.
+
+    The engine never reads any of it. It travels with the run so the runtime
+    can answer in the place the request came from rather than in a channel
+    configured once for everything.
+    """
+
+    channel: str = ""
+    thread_id: str = ""
+    author: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class RunState:
     """Everything the engine needs to decide what happens next."""
 
@@ -62,6 +81,8 @@ class RunState:
     failure_reason: str = ""
     workflow_definition: WorkflowDefinition | None = None
     """The compiled definition snapshot used by this run."""
+    origin: RunOrigin | None = None
+    """The conversation this run was requested from, or ``None`` for the web."""
 
     @property
     def agent_runs_remaining(self) -> int:
@@ -72,4 +93,4 @@ class RunState:
         return self.phase in (RunPhase.SUCCEEDED, RunPhase.FAILED)
 
 
-__all__ = ["RunPhase", "RunState"]
+__all__ = ["RunOrigin", "RunPhase", "RunState"]

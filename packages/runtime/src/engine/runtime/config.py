@@ -84,6 +84,24 @@ class CommunicationsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkOrdersConfig:
+    """What a work order gets when nobody filled in a form to ask for one.
+
+    Starting one from a chat message means starting it from a sentence, so the
+    three answers the web form collects alongside the prompt have to come from
+    somewhere. `repository` has no sensible default and is what makes the
+    feature available at all: without it a mention is answered with a note
+    saying so rather than with a run against a repository nobody named.
+    """
+
+    repository: str = ""
+    workflow: str = ""
+    """Which workflow to run, or empty for the deployment's only one."""
+    runner: str = ""
+    """Which agent runs it, or empty for the executor's default."""
+
+
+@dataclass(frozen=True, slots=True)
 class EngineConfig:
     """All configuration understood by this version of Engine."""
 
@@ -92,6 +110,7 @@ class EngineConfig:
     github_token: str = ""
     public_url: str = ""
     communications: CommunicationsConfig = CommunicationsConfig()
+    work_orders: WorkOrdersConfig = WorkOrdersConfig()
     approvals: ApprovalConfig = ApprovalConfig()
     workflows: WorkflowsConfig = WorkflowsConfig()
     orchestrator: OrchestratorConfig = OrchestratorConfig()
@@ -179,6 +198,7 @@ def parse_engine_config(document: Mapping[str, object]) -> EngineConfig:
             "github_token",
             "orchestrator",
             "public_url",
+            "work_orders",
             "workflows",
         },
         "configuration",
@@ -211,6 +231,18 @@ def parse_engine_config(document: Mapping[str, object]) -> EngineConfig:
         )
     communications_channel = _optional_nonblank_string(
         communications.get("channel", ""), "communications.channel"
+    )
+
+    work_orders = _table(document.get("work_orders", {}), "work_orders")
+    _reject_unknown(work_orders, {"repository", "runner", "workflow"}, "work_orders")
+    work_order_repository = _optional_nonblank_string(
+        work_orders.get("repository", ""), "work_orders.repository"
+    )
+    work_order_workflow = _optional_nonblank_string(
+        work_orders.get("workflow", ""), "work_orders.workflow"
+    )
+    work_order_runner = _optional_nonblank_string(
+        work_orders.get("runner", ""), "work_orders.runner"
     )
 
     claude = _table(document.get("claude", {}), "claude")
@@ -276,6 +308,11 @@ def parse_engine_config(document: Mapping[str, object]) -> EngineConfig:
         communications=CommunicationsConfig(
             provider=communications_provider,
             channel=communications_channel,
+        ),
+        work_orders=WorkOrdersConfig(
+            repository=work_order_repository,
+            workflow=work_order_workflow,
+            runner=work_order_runner,
         ),
         claude=ClaudeConfig(output_style=output_style),
         approvals=ApprovalConfig(
@@ -405,6 +442,7 @@ __all__ = [
     "EngineConfigError",
     "LoadedEngineConfig",
     "ResponseStyle",
+    "WorkOrdersConfig",
     "WorkflowsConfig",
     "describe_loaded_config",
     "load_engine_config",

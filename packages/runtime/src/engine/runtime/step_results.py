@@ -44,9 +44,21 @@ _CLARIFICATION_OR_ESCALATION_TOOLS = frozenset(
 )
 
 
-def step_result_instructions(step: StepSpec) -> str:
+def step_result_instructions(step: StepSpec, *, status_updates: bool = False) -> str:
     """Tell the agent which tool calls may end or pause this step."""
     outputs = ", ".join(step.required_outputs) or "none"
+    # Said here as well as in the tool's own description because a step is told
+    # what ends it in this note, and a reporting tool introduced only in the
+    # listing reads as optional decoration next to that.
+    reporting = (
+        "\n\nThis work order was requested in a conversation, and the person who "
+        "asked is watching it there. Call `update_status` as you go -- when you "
+        "have understood the request, when you start making the change, and "
+        "whenever something happens they would want to know about. It does not "
+        "end the step."
+        if status_updates
+        else ""
+    )
     return (
         "When this step is complete, call the workflow MCP tool `complete_step`. "
         "If you are only answering a human's question and did not change the "
@@ -54,7 +66,8 @@ def step_result_instructions(step: StepSpec) -> str:
         "state unchanged. If the step cannot be completed, call `fail_step`. "
         "If you need information "
         "or a human decision before continuing, use an available clarification or "
-        "escalation tool. Do not end the session without making one of those calls.\n\n"
+        "escalation tool. Do not end the session without making one of those calls."
+        f"{reporting}\n\n"
         f"The declared outputs for `complete_step` are: {outputs}."
     )
 
@@ -62,6 +75,18 @@ def step_result_instructions(step: StepSpec) -> str:
 def requests_clarification_or_escalation(turn: AgentTurn) -> bool:
     """Whether a provider tool call validly pauses an unfinished step."""
     return _messages_request_clarification_or_escalation(turn.transcript)
+
+
+def awaits_human_answer(turn: AgentTurn) -> bool:
+    """Whether this turn stopped on a question rather than on `clarify`.
+
+    Both end the turn the same way, and both are valid, but they are opposite
+    things to say to a person watching: one is waiting on them, and the other
+    is the agent reporting that it answered and changed nothing.
+    """
+    return any(
+        name != "clarify" for name in _clarification_tools(turn.transcript)
+    )
 
 
 def latest_turn_requests_clarification_or_escalation(
@@ -82,6 +107,12 @@ def latest_turn_requests_clarification_or_escalation(
 def _messages_request_clarification_or_escalation(
     messages: Sequence[Message],
 ) -> bool:
+    return bool(_clarification_tools(messages))
+
+
+def _clarification_tools(messages: Sequence[Message]) -> frozenset[str]:
+    """Which pausing tools these messages called, by their normalized name."""
+    called = set()
     for message in messages:
         for call in message.tool_calls:
             leaf_name = call.name.rsplit("__", 1)[-1].rsplit(".", 1)[-1]
@@ -91,8 +122,8 @@ def _messages_request_clarification_or_escalation(
                 if character.isalnum()
             )
             if normalized in _CLARIFICATION_OR_ESCALATION_TOOLS:
-                return True
-    return False
+                called.add(normalized)
+    return frozenset(called)
 
 
 def complete_step_tool(step: StepSpec) -> ToolSpec:
@@ -314,6 +345,7 @@ def run_failed_from_arguments(
 __all__ = [
     "INVALID_COMPLETION_ERROR",
     "InvalidStepResultError",
+    "awaits_human_answer",
     "complete_step_tool",
     "fail_step_tool",
     "latest_turn_requests_clarification_or_escalation",

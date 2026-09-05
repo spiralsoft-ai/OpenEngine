@@ -735,6 +735,8 @@ def test_terminal_mcp_configuration_is_passed_to_claude() -> None:
     assert "mcp__workflow__clarify" in allowed
     assert "mcp__workflow__complete_step" in allowed
     assert "mcp__workflow__fail_step" in allowed
+    # Reporting progress is not an action to be approved one line at a time.
+    assert "mcp__workflow__update_status" in allowed
     interactive = runner.interactive_command_line(PROFILE, server)
     assert json.loads(interactive[interactive.index("--mcp-config") + 1]) == config
 

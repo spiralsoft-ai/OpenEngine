@@ -49,8 +49,12 @@ from engine.ports import (
 )
 from engine.runtime.capabilities import Capabilities
 from engine.runtime.dispatcher import Dispatcher
+from engine.runtime.notifications import RunNotifier
 from engine.runtime.profiles import with_granted_tools
-from engine.runtime.step_results import requests_clarification_or_escalation
+from engine.runtime.step_results import (
+    awaits_human_answer,
+    requests_clarification_or_escalation,
+)
 from engine.runtime.terminal_mcp import TerminalMcpBroker, TerminalResultRegistry
 from engine.runtime.workflows import WorkflowCatalog
 
@@ -95,6 +99,7 @@ class WorkflowExecutor:
         self._default_branch = default_branch
         self._communications_channel = communications_channel
         self._public_url = public_url.rstrip("/")
+        self._notifier = RunNotifier(capabilities.communications, public_url)
         unreviewable = sorted(set(self._runners) - set(self._review_runners))
         if unreviewable:
             raise WorkflowExecutionError(
@@ -290,18 +295,22 @@ class WorkflowExecutor:
             selected_name = await self._runner_name_for_step(
                 state, step, runner_name
             )
+            continuation = (
+                command.prompt
+                if command.agent_run_id != agent_run_id(state.run_id, step.step_id)
+                else None
+            )
+            if continuation is None:
+                # Entering the step rather than carrying one on, which is what
+                # makes this the place a run says its review stage has begun.
+                await self._notifier.announce(state, f"*{step.name}* started.")
             outcome = await self._run_step(
                 state,
                 command,
                 definition=definition,
                 runner=self._runner_for(step, selected_name),
                 runner_name=selected_name,
-                continuation=(
-                    command.prompt
-                    if command.agent_run_id
-                    != agent_run_id(state.run_id, step.step_id)
-                    else None
-                ),
+                continuation=continuation,
             )
             if outcome is None:
                 return state
@@ -318,28 +327,35 @@ class WorkflowExecutor:
         step = definition.step(command.step_id)
         if not isinstance(step, HumanReviewStep) or step.notification is None:
             return
-        if not self._communications_channel or not self._public_url:
-            return
-        pull_request_url = next(
-            (
-                output.value
-                for result in reversed(state.step_results)
-                for output in result.outputs
-                if output.name == "pr_url" and output.value
-            ),
-            None,
-        )
+        pull_request_url = _pull_request_url(state)
         outcome = state.step_results[-1].outcome if state.step_results else "unknown"
-        message_text = f"Ready for human review: {command.title}\nOutcome: {outcome}"
         links = []
         if pull_request_url:
             links.append(MessageLink("Open pull request", pull_request_url))
+        if state.origin is not None:
+            # The run was asked for in a conversation, so the person who asked
+            # is told there, by name: this is the point the work stops needing
+            # an agent and starts needing them.
+            work_order = self._notifier.work_order_link(state)
+            if work_order is not None:
+                links.append(work_order)
+            await self._notifier.announce(
+                state,
+                f"Review complete and ready for your decision: {command.title}\n"
+                f"Outcome: {outcome}",
+                links=links,
+                mention=True,
+            )
+            return
+        if not self._communications_channel or not self._public_url:
+            return
         links.append(
             MessageLink(
                 "Open human review task",
                 f"{self._public_url}/runs/{command.run_id}",
             )
         )
+        message_text = f"Ready for human review: {command.title}\nOutcome: {outcome}"
         message = CommunicationMessage(message_text, tuple(links))
         try:
             await self._capabilities.communications.post(
@@ -473,6 +489,11 @@ class WorkflowExecutor:
     ) -> _StepOutcome | None:
         assert command.step is not None
         folded: _StepOutcome | None = None
+        step = definition.step(command.step.step_id)
+        step_name = step.name if step is not None else str(command.step.step_id)
+
+        async def report_status(status: str) -> None:
+            await self._notifier.announce(state, f"*{step_name}*: {status}")
 
         async def fold(event: Event) -> _StepOutcome:
             transition_state = state
@@ -506,12 +527,16 @@ class WorkflowExecutor:
                 else None
             ),
             continuation=continuation,
+            on_status=report_status if state.origin is not None else None,
         )
         if folded is not None:
             assert terminal == folded.event
+            await self._announce_result(folded, step_name)
             return folded
         if isinstance(terminal, (StepCompleted, RunFailed)):
-            return await fold(terminal)
+            outcome = await fold(terminal)
+            await self._announce_result(outcome, step_name)
+            return outcome
         if requests_clarification_or_escalation(terminal):
             if deferred_state is None:
                 await self._transition(
@@ -523,9 +548,49 @@ class WorkflowExecutor:
                     ),
                     definition,
                 )
+            if awaits_human_answer(terminal):
+                # `clarify` is reported by the tool server as it is called, so
+                # only a genuine question is announced here -- otherwise the
+                # same pause would be said twice, and the second time wrongly.
+                await self._notifier.announce(
+                    state,
+                    f"*{step_name}* is waiting for an answer.\n"
+                    f"{terminal.message.content}".strip(),
+                    links=_links(self._notifier.work_order_link(state)),
+                )
             return None
         raise WorkflowExecutionError(
             f"{command.step.step_id} runner exited without a valid completion state"
+        )
+
+    async def _announce_result(self, outcome: _StepOutcome, step_name: str) -> None:
+        """Report a step's ending in the conversation that asked for the run.
+
+        Read off the folded state rather than the event, so the pull request
+        named here is whichever output the step actually declared it under and
+        the message cannot drift from what the run recorded.
+        """
+        state = outcome.state
+        if isinstance(outcome.event, RunFailed):
+            await self._notifier.announce(
+                state,
+                f"*{step_name}* failed.\n{outcome.event.reason}".strip(),
+                links=_links(self._notifier.work_order_link(state)),
+            )
+            return
+        if not isinstance(outcome.event, StepCompleted):
+            return
+        links = []
+        pull_request_url = _pull_request_url(state)
+        if pull_request_url:
+            links.append(MessageLink("Open pull request", pull_request_url))
+        work_order = self._notifier.work_order_link(state)
+        if work_order is not None:
+            links.append(work_order)
+        await self._notifier.announce(
+            state,
+            f"*{step_name}* complete.\n{outcome.event.summary}".strip(),
+            links=links,
         )
 
     async def _transition(
@@ -585,7 +650,32 @@ class WorkflowExecutor:
             return
         definition = self._definition_for(state)
         failure = RunFailed(run_id=run_id, reason=f"{type(error).__name__}: {error}")
-        await self._transition(state, failure, definition)
+        failed, _commands = await self._transition(state, failure, definition)
+        # The run died somewhere other than a step's own ending, so nothing
+        # else will say so -- and a thread that simply goes quiet is the one
+        # outcome a person cannot tell from work still in progress.
+        await self._notifier.announce(
+            failed,
+            f"This work order failed.\n{failure.reason}",
+            links=_links(self._notifier.work_order_link(failed)),
+        )
+
+
+def _pull_request_url(state: RunState) -> str:
+    """The newest `pr_url` any completed step declared, or empty."""
+    return next(
+        (
+            output.value
+            for result in reversed(state.step_results)
+            for output in result.outputs
+            if output.name == "pr_url" and output.value
+        ),
+        "",
+    )
+
+
+def _links(link: MessageLink | None) -> tuple[MessageLink, ...]:
+    return (link,) if link is not None else ()
 
 
 def _only(commands: Sequence[Command], expected: type[Command]) -> Command:

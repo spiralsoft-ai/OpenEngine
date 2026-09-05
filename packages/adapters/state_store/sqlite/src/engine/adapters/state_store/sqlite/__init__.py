@@ -52,7 +52,7 @@ from engine.domain.ids import (
     WorkspaceId,
 )
 from engine.domain.planning import Milestone, Project, Workstream
-from engine.domain.state import RunPhase, RunState
+from engine.domain.state import RunOrigin, RunPhase, RunState
 from engine.domain.workflow import (
     AgentStep,
     HumanReviewNotification,
@@ -978,6 +978,15 @@ def _state_to_dict(state: RunState) -> dict[str, object]:
             if state.workflow_definition is not None
             else None
         ),
+        "origin": (
+            {
+                "channel": state.origin.channel,
+                "thread_id": state.origin.thread_id,
+                "author": state.origin.author,
+            }
+            if state.origin is not None
+            else None
+        ),
     }
 
 
@@ -1050,6 +1059,17 @@ def _state_from_dict(value: dict[str, object]) -> RunState:
             if isinstance(value.get("workflow_definition"), dict)
             else None
         ),
+        origin=_origin_from_dict(value.get("origin")),
+    )
+
+
+def _origin_from_dict(value: object) -> RunOrigin | None:
+    if not isinstance(value, dict):
+        return None
+    return RunOrigin(
+        channel=str(value.get("channel", "")),
+        thread_id=str(value.get("thread_id", "")),
+        author=str(value.get("author", "")),
     )
 
 

@@ -160,6 +160,7 @@ def compose_app(
         slack_credential_store=slack_credential_store,
         communications_channel=loaded.config.communications.channel,
         public_url=loaded.config.public_url,
+        work_orders=loaded.config.work_orders,
     )
 
 

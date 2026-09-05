@@ -493,16 +493,21 @@ export function disconnectGitHub(): Promise<void> {
   return api<void>("/api/github/disconnect", { method: "POST" });
 }
 
-export type SlackStatus = { configured: boolean; connected: boolean };
+/** `events` is whether a mention could start a work order right now. */
+export type SlackStatus = { configured: boolean; connected: boolean; events?: boolean };
 
 export function getSlackStatus(): Promise<SlackStatus> {
   return api<SlackStatus>("/api/slack/status");
 }
 
-export function setSlackCredentials(clientId: string, clientSecret: string): Promise<void> {
+export function setSlackCredentials(
+  clientId: string,
+  clientSecret: string,
+  signingSecret?: string,
+): Promise<void> {
   return api<void>("/api/slack/credentials", {
     method: "POST",
-    body: JSON.stringify({ clientId, clientSecret }),
+    body: JSON.stringify({ clientId, clientSecret, signingSecret }),
   });
 }
 

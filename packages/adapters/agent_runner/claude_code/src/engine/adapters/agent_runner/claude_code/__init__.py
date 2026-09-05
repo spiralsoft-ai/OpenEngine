@@ -581,6 +581,13 @@ class ClaudeCodeAgentRunner:
                 f"mcp__{mcp_server.name}__clarify",
                 f"mcp__{mcp_server.name}__complete_step",
                 f"mcp__{mcp_server.name}__fail_step",
+                # Reporting rather than acting: it says a sentence in the
+                # conversation the run came from and touches nothing else, so
+                # it belongs with the other three that no profile grants. The
+                # broker serves it only when there is somewhere to report to,
+                # and naming it here when there is not costs nothing -- a tool
+                # the server does not list is a tool the model never sees.
+                f"mcp__{mcp_server.name}__update_status",
                 *(
                     f"mcp__{mcp_server.name}__{capability}"
                     for capability in profile.capabilities

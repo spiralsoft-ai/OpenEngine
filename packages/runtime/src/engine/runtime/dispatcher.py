@@ -47,6 +47,7 @@ from engine.runtime.step_results import (
 )
 from engine.runtime.terminal_mcp import (
     REPOSITORY_TOOL_METHODS,
+    StatusReporter,
     TerminalEvent,
     TerminalMcpBroker,
     TerminalResultRegistry,
@@ -132,6 +133,7 @@ class Dispatcher:
         on_terminal_result: Callable[[TerminalEvent], Awaitable[None]] | None = None,
         on_approval: ApprovalHandler | None = None,
         continuation: str | None = None,
+        on_status: StatusReporter | None = None,
     ) -> AgentTurn | TerminalEvent:
         """Run or continue a workflow step, preferring a delivered MCP result."""
         caps = self._capabilities
@@ -146,8 +148,14 @@ class Dispatcher:
         # naming them in the user prompt does not stop a note introduced as an
         # enumeration from reading as a complete one.
         served: tuple[str, ...] = ()
+        reports_status = on_status is not None and isinstance(
+            selected_runner, McpAgentRunner
+        )
         if isinstance(selected_runner, McpAgentRunner):
-            served = terminal_tool_names(self.repository_tools(command.profile))
+            served = terminal_tool_names(
+                self.repository_tools(command.profile),
+                status_updates=reports_status,
+            )
         command = replace(
             command, profile=with_granted_tools(command.profile, served)
         )
@@ -162,7 +170,8 @@ class Dispatcher:
         )
         conversation = await caps.state_store.load_conversation(instance.instance_id)
         initial_prompt = Message.user(
-            f"{command.prompt}\n\n{step_result_instructions(command.step)}"
+            f"{command.prompt}\n\n"
+            f"{step_result_instructions(command.step, status_updates=reports_status)}"
         )
         if conversation is not None and not conversation.messages:
             await caps.state_store.append_messages(
@@ -227,6 +236,7 @@ class Dispatcher:
                         observe,
                         on_approval,
                         observed_tool_call_id,
+                        on_status if reports_status else None,
                     )
                 elif isinstance(selected_runner, StreamingAgentRunner):
                     result = None
@@ -340,6 +350,7 @@ class Dispatcher:
         on_message: TurnObserver,
         on_approval: ApprovalHandler | None,
         tool_call_ids: ToolCallLookup | None = None,
+        on_status: StatusReporter | None = None,
     ) -> tuple[TerminalEvent | None, AgentTurn | None, tuple[Message, ...]]:
         """Run until a terminal result or clarification request is produced."""
         assert command.step is not None
@@ -350,6 +361,12 @@ class Dispatcher:
             registry=self._terminal_results,
             deliver=deliver,
         )
+        if on_status is not None:
+            # Same tolerance as the repository hook below: a transport fake
+            # that models only terminal delivery keeps working.
+            enable_status = getattr(broker, "enable_status_updates", None)
+            if enable_status is not None:
+                enable_status(on_status)
         repository_tools = self.repository_tools(command.profile)
         if repository_tools:
             # Older transport fakes may model only terminal delivery. The real
