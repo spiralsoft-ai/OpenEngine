@@ -3,7 +3,10 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   api,
   completeHumanReview,
+  decideGraphApproval,
   deleteRun,
+  getGraphEvents,
+  getGraphRun,
   milestoneDetailsUrl,
   type ApiMilestone,
   type ApiGraphEvent,
@@ -13,6 +16,7 @@ import {
   type ApiRunStep,
   type ApiWorkflowRun,
   type ApiWorkflowRunListing,
+  type ApprovalDecision,
   type EngineConfig,
 } from "./api";
 import { Stat, StatStrip } from "./brand";
@@ -582,156 +586,6 @@ function StepCard({ step, current }: { step: ApiRunStep; current: boolean }) {
   );
 }
 
-/** One thing an agent did, as the conversation page draws it. */
-type ConversationEntry = {
-  sequence: number;
-  /** What it said, for the entries that are speech. */
-  text?: string;
-  /** For the entries that are work: what kind of thing it was, what the agent
-   *  called the thing it was doing, and how that ended once it has. */
-  did?: { label: string; name: string; outcome: string };
-};
-
-/** How a decision on a request reads, in the words `chat.tsx` uses for one. */
-function decisionText(decision: string): string {
-  switch (decision) {
-    case "accept":
-      return "Approved.";
-    case "accept_for_session":
-      return "Approved, and allowed again for this conversation without asking.";
-    case "cancel":
-      return "Cancelled — the action did not run.";
-    default:
-      return "Answered.";
-  }
-}
-
-/** What a node's agent has done, in the order it did it.
- *
- *  Work belongs here beside the messages, because of when each is published: an
- *  ACP turn reports a tool call as it makes it and a permission request as it
- *  raises it, but a message only once the agent stops to do one of those. An
- *  implementation agent works for as long as the change takes, and one that has
- *  asked to run something waits for as long as the person does — so a page
- *  reading transcript events alone has nothing to show for either, and reports
- *  the two states an implementation run spends its time in as a conversation
- *  that never started. */
-function conversationActivity(events: ApiGraphEvent[]): ConversationEntry[] {
-  // Keyed by what raised the question as well as by its id, because the two
-  // vocabularies are the agent's and the runtime's and nothing says a call id
-  // cannot read like an approval id.
-  const outcomes = new Map<string, string>();
-  for (const event of events) {
-    if (event.type === "tool.result")
-      outcomes.set(`tool:${String(event.payload.callId ?? "")}`, String(event.payload.result ?? ""));
-    if (event.type === "approval.resolved")
-      outcomes.set(
-        `approval:${String(event.payload.approvalId ?? "")}`,
-        decisionText(String(event.payload.decision ?? "")),
-      );
-  }
-  return events.flatMap((event): ConversationEntry[] => {
-    if (event.type === "transcript")
-      return [{ sequence: event.sequence, text: String(event.payload.text ?? "") }];
-    if (event.type === "tool.call")
-      return [
-        {
-          sequence: event.sequence,
-          did: {
-            label: "Tool",
-            // A call the agent named nothing is still a call it made, and
-            // saying so beats a blank line where the work was.
-            name: String(event.payload.name ?? "") || "Tool call",
-            outcome: outcomes.get(`tool:${String(event.payload.callId ?? "")}`) ?? "",
-          },
-        },
-      ];
-    if (event.type !== "approval.requested") return [];
-    return [
-      {
-        sequence: event.sequence,
-        did: {
-          label: "Approval",
-          // The command, because that is the thing being consented to. The
-          // agent's own description of it when there is no command to show.
-          name:
-            String(event.payload.command ?? "") ||
-            String(event.payload.reason ?? "") ||
-            String(event.payload.toolName ?? "") ||
-            "Permission request",
-          // An unanswered request says so rather than sitting blank: a run
-          // stopped here is stopped on somebody, and this page is where they
-          // find out that it is them.
-          outcome:
-            outcomes.get(`approval:${String(event.payload.approvalId ?? "")}`) ??
-            "Waiting for your decision.",
-        },
-      },
-    ];
-  });
-}
-
-export function GraphConversationPage({ runId, nodeId }: { runId: string; nodeId: string }) {
-  const [events, setEvents] = useState<ApiGraphEvent[]>();
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    let timer: number | undefined;
-    const load = () => {
-      api<{ events: ApiGraphEvent[] }>(
-        `/api/runs/${encodeURIComponent(runId)}/graph-events`,
-      )
-        .then((value) => {
-          if (cancelled) return;
-          setEvents(value.events.filter((event) => event.nodeId === nodeId));
-          setError("");
-        })
-        .catch((reason: Error) => {
-          if (!cancelled) setError(reason.message);
-        })
-        .finally(() => {
-          if (!cancelled) timer = window.setTimeout(load, 1000);
-        });
-    };
-    load();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [runId, nodeId]);
-  const activity = events && conversationActivity(events);
-  return (
-    <main className="panel-scroll">
-      <header className="hero hero-narrow">
-        <a className="back-link" href={`/runs/${encodeURIComponent(runId)}`}>← WorkOrder</a>
-        <p className="eyebrow">Graph conversation</p>
-        <h1>{phaseLabel(nodeId)}</h1>
-      </header>
-      {error ? <p className="notice notice-block">{error}</p> : !activity ? (
-        <p className="state-inline">Loading conversation…</p>
-      ) : activity.length === 0 ? (
-        <p className="state-inline">Waiting for agent activity…</p>
-      ) : (
-        <section className="timeline" aria-label="Conversation activity">
-          {activity.map((entry) => (
-            <article className="callout" key={entry.sequence}>
-              {entry.did ? (
-                <>
-                  <p className="eyebrow">{entry.did.label}</p>
-                  <p>{entry.did.name}</p>
-                  {entry.did.outcome && <p className="micro">{entry.did.outcome}</p>}
-                </>
-              ) : (
-                <p>{entry.text}</p>
-              )}
-            </article>
-          ))}
-        </section>
-      )}
-    </main>
-  );
-}
-
 function GraphApprovalDecision({
   runId,
   approval,
@@ -744,16 +598,11 @@ function GraphApprovalDecision({
   const [submitting, setSubmitting] = useState<string>();
   const [error, setError] = useState("");
 
-  const decide = async (decision: string) => {
+  const decide = async (decision: ApprovalDecision) => {
     setSubmitting(decision);
     setError("");
     try {
-      onDecided(
-        await api<ApiGraphRun>(
-          `/graph/api/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approval.approvalId)}`,
-          { method: "POST", body: JSON.stringify({ decision }) },
-        ),
-      );
+      onDecided(await decideGraphApproval(runId, approval.approvalId, decision));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -824,9 +673,9 @@ export function RunDetailPage({ runId }: { runId: string }) {
         setRun(value);
         if (!value.workflowVersion) {
           const [nextGraph, nextTopology, eventLog] = await Promise.all([
-            api<ApiGraphRun>(`/graph/api/runs/${encodeURIComponent(runId)}`),
+            getGraphRun(runId),
             api<ApiGraphTopology>(`/graph/api/graphs/${encodeURIComponent(value.workflowId)}`),
-            api<{ events: ApiGraphEvent[] }>(`/api/runs/${encodeURIComponent(runId)}/graph-events`),
+            getGraphEvents(runId),
           ]);
           if (cancelled) return;
           setGraph(nextGraph);
@@ -938,17 +787,17 @@ export function RunDetailPage({ runId }: { runId: string }) {
             </section>
           )}
           <StageProgress run={run} />
-          {/* A [BETA] WorkOrder is run by the graph engine, which keeps its own
-              record of where it got to. This page only holds the row, so there
-              are no stage cards to show and nothing here to say yes to yet --
-              which would otherwise look like a WorkOrder that never started. */}
+          {/* A [BETA] WorkOrder's stages are the graph's nodes, so having none
+              means the graph engine could not be read -- not that the run has
+              no stages. Saying so beats a page that looks like a WorkOrder
+              which never started. */}
           {run.steps.length === 0 && !run.workflowVersion && (
             <section className="callout">
               <p className="eyebrow">Beta workflow</p>
               <p>
-                This WorkOrder is running on the new graph engine. Its stages,
-                conversations and approvals are not on this page yet — they are
-                served under <code>/graph/api/runs/{run.runId}</code>.
+                This WorkOrder runs on the graph engine, and its stages could not
+                be read from it. They are served under{" "}
+                <code>/graph/api/runs/{run.runId}</code>.
               </p>
             </section>
           )}

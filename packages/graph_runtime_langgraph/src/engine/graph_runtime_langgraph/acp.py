@@ -194,6 +194,7 @@ class _Turn:
             continuation=continuation,
             request=dict(request.params),
             approval_id=approval_id,
+            tool_call_id=self.node.call_of(request),
         )
         # Answered without the process ever going away, so the continuation has
         # done its job and the approval comes back off it. Deliberately not in a
@@ -223,6 +224,22 @@ class _Turn:
                 session_key=self.session_key,
             ),
         )
+
+
+def prompt_text(prompt: ACPPrompt) -> str:
+    """The words in a prompt, for the transcript that records it being sent.
+
+    A prompt is either a string or the content blocks ACP carries, and only the
+    text of those is worth writing down: an image or a resource link is part of
+    the request but not part of what a reader is reading.
+    """
+    if isinstance(prompt, str):
+        return prompt
+    return "".join(
+        str(block.get("text", ""))
+        for block in prompt
+        if isinstance(block, Mapping) and block.get("type") == "text"
+    )
 
 
 def _outcome(
@@ -366,11 +383,13 @@ class ACPNode:
                     "resumed": resuming is not None,
                 },
             )
-            said = await self._speak(
-                turn,
-                session,
-                self.continuation_prompt if resuming else self._prompt(state),
-            )
+            asked = self.continuation_prompt if resuming else self._prompt(state)
+            # Published before the turn it starts, because a transcript that
+            # holds only the agent's half is not a conversation: a reader
+            # opening one has to guess what was asked, and cannot tell the work
+            # the node was sent to do from the work somebody steered it into.
+            await execution.say(prompt_text(asked), role="user")
+            said = await self._speak(turn, session, asked)
             # Steering that arrived while the agent worked is a further turn in
             # the same conversation rather than a restart: same session id, same
             # transcript, same tool history.
@@ -547,6 +566,17 @@ class ACPNode:
                 return value
         return ""
 
+    def call_of(self, request: ACPPermissionRequest) -> str:
+        """The call this request is about, in the agent's own ids.
+
+        The same id the agent puts on the `tool_call` update it sends for the
+        work itself, which is what lets a reader be shown the question beside
+        the command rather than beside the turn. Empty when the agent named no
+        call, and a client that gets nothing here has nothing to pair.
+        """
+        value = request.tool_call.get("toolCallId")
+        return value if isinstance(value, str) else ""
+
 
 __all__ = [
     "APPROVAL_ID",
@@ -555,4 +585,5 @@ __all__ = [
     "RUN_ID",
     "ACPNode",
     "answer_permission",
+    "prompt_text",
 ]

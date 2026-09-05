@@ -14,20 +14,17 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 import {
-  api,
-  answerQuestion,
-  decideApproval,
   messageText,
   RUN_NOT_STARTED_ERROR_CODE,
   stopRun,
   type ApiApproval,
-  type ApiThread,
   type ApprovalDecision,
 } from "./api";
-import { useApprovals, type InlineApproval } from "./approvals";
+import { approvalActions, useApprovals, type InlineApproval } from "./approvals";
 import { Stat, StatStrip } from "./brand";
 import { WorkspaceControl } from "./workspace";
 
@@ -471,6 +468,18 @@ const KIND_LABELS: Record<ApiApproval["kind"], string> = {
   user_input: "Has a question",
 };
 
+/** Whether this request is a form to fill in rather than a yes or no.
+ *
+ *  The questions decide, not the kind. A provider states what it wants an
+ *  answer to; a runtime may raise a request for a person under the same kind
+ *  and put no questions on it -- a graph's human-review node asks for a verdict
+ *  that way. Rendering a question form for one would present an empty dialog
+ *  with nothing to submit, in front of the only control that would move the run
+ *  on. */
+function asksQuestions(approval: ApiApproval): boolean {
+  return approval.kind === "user_input" && Boolean(approval.questions?.length);
+}
+
 /** What became of a request that is no longer open, and on whose say-so. */
 export function outcomeText(approval: ApiApproval): string {
   if (approval.status === "interrupted")
@@ -481,9 +490,8 @@ export function outcomeText(approval: ApiApproval): string {
     return approval.decision === "cancel"
       ? "Refused by the configured policy — the action did not run."
       : "Allowed by the configured policy, without asking.";
-  if (approval.kind === "user_input" && approval.answers)
-    return "Answered.";
-  if (approval.kind === "user_input" && approval.decision === "cancel")
+  if (asksQuestions(approval) && approval.answers) return "Answered.";
+  if (asksQuestions(approval) && approval.decision === "cancel")
     return "Cancelled — no answer was sent.";
   switch (approval.decision) {
     case "accept":
@@ -537,7 +545,7 @@ function ApprovalArguments({ approval }: { approval: ApiApproval }) {
 
 /** The one line a folded approval is worth: what happened, and to what. */
 export function summaryText(approval: ApiApproval): string {
-  if (approval.kind === "user_input") {
+  if (asksQuestions(approval)) {
     const question = approval.questions?.[0]?.question ?? "Question";
     if (approval.status === "pending") return `Answer needed · ${question}`;
     return approval.decision === "cancel"
@@ -611,7 +619,7 @@ function QuestionForm({
     setBusy(true);
     setError(undefined);
     try {
-      await answerQuestion(threadId, approval.id, answers);
+      await approvalActions(threadId).answer(approval.id, answers);
     } catch (failure) {
       setBusy(false);
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -622,7 +630,7 @@ function QuestionForm({
     setBusy(true);
     setError(undefined);
     try {
-      await decideApproval(threadId, approval.id, "cancel");
+      await approvalActions(threadId).decide(approval.id, "cancel");
     } catch (failure) {
       setBusy(false);
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -745,7 +753,7 @@ export function ApprovalEntry({
     setSubmitted(decision);
     setError(undefined);
     try {
-      await decideApproval(threadId, approval.id, decision);
+      await approvalActions(threadId).decide(approval.id, decision);
     } catch (failure) {
       // Stale, already answered, or a provider that has since died. The
       // decision did not land, so the controls come back with the reason.
@@ -785,10 +793,10 @@ export function ApprovalEntry({
           </dl>
         )}
         <ApprovalArguments approval={approval} />
-        {pending && approval.kind === "user_input" && (
+        {pending && asksQuestions(approval) && (
           <QuestionForm threadId={threadId} approval={approval} />
         )}
-        {pending && approval.kind !== "user_input" ? (
+        {pending && !asksQuestions(approval) ? (
           <div className="approval-actions">
             {approval.allowedDecisions.map((decision) => (
               <button
@@ -938,28 +946,45 @@ export function ConversationStats() {
   );
 }
 
-export function ChatThread({ project = false }: { project?: boolean }) {
+/** The transcript, and the controls under it.
+ *
+ *  `empty` and `dock` are what a conversation that is not a chat replaces. Both
+ *  halves of the difference are there: what an empty one says, and what sending
+ *  means. Everything between them -- the turns, the folded calls, the approval
+ *  cards -- is the same view whichever engine is answering, which is the point:
+ *  a WorkOrder's agent reads as the conversation it is rather than as a second
+ *  rendering of one. */
+export function ChatThread({
+  project = false,
+  empty,
+  dock,
+}: {
+  project?: boolean;
+  empty?: ReactNode;
+  dock?: ReactNode;
+}) {
   return (
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="stream">
         <WorkflowBacklink />
         <ThreadPrimitive.Empty>
-          {!project && (
-            <div className="welcome">
-              <div className="welcome-copy">
-                <p className="eyebrow">OpenEngine / Chat</p>
-                <h1>Start a conversation.</h1>
-                <p className="lede">Each chat has its own agent history and Git worktree.</p>
+          {empty ??
+            (!project && (
+              <div className="welcome">
+                <div className="welcome-copy">
+                  <p className="eyebrow">OpenEngine / Chat</p>
+                  <h1>Start a conversation.</h1>
+                  <p className="lede">Each chat has its own agent history and Git worktree.</p>
+                </div>
               </div>
-            </div>
-          )}
+            ))}
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages>
           {({ message }) =>
             message.role === "user" ? <UserMessage /> : <AssistantMessage />
           }
         </ThreadPrimitive.Messages>
-        <Dock project={project} />
+        {dock ?? <Dock project={project} />}
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
   );

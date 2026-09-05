@@ -234,7 +234,13 @@ export type ApiGraphRun = {
     approvalId: string;
     nodeId: string;
     reason: string;
+    /** Only a request still open says what may be answered, which is why a
+     *  conversation reads its open questions from here rather than from the
+     *  event that raised them. */
     allowedDecisions: string[];
+    kind?: string;
+    command?: string;
+    toolName?: string;
   }[];
   error: string;
 };
@@ -250,6 +256,61 @@ export type ApiGraphEvent = {
   nodeId: string | null;
   payload: Record<string, unknown>;
 };
+
+/** Everything the graph engine has said about a run so far.
+ *
+ *  A finite snapshot of the same feed `/graph/api/runs/{run}/events` streams,
+ *  because a page that opens after an agent has finished still has to be able
+ *  to read what it did. */
+export function getGraphEvents(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<{ events: ApiGraphEvent[] }> {
+  return api<{ events: ApiGraphEvent[] }>(
+    `/api/runs/${encodeURIComponent(runId)}/graph-events`,
+    { signal },
+  );
+}
+
+export function getGraphRun(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ApiGraphRun> {
+  return api<ApiGraphRun>(`/graph/api/runs/${encodeURIComponent(runId)}`, {
+    signal,
+  });
+}
+
+/** Say something to the agent a node is running, while it runs.
+ *
+ *  Addressed to the node rather than to the run: a graph may have several
+ *  agents working at once, and the conversation on screen is one of them. The
+ *  engine refuses this when that node has nothing in flight, because there is
+ *  nobody to say it to -- steering is a message for a live turn, not a queued
+ *  instruction for whatever runs next. */
+export function steerGraphRun(
+  runId: string,
+  nodeId: string,
+  message: string,
+): Promise<ApiGraphRun> {
+  return api<ApiGraphRun>(
+    `/graph/api/runs/${encodeURIComponent(runId)}/steering`,
+    { method: "POST", body: JSON.stringify({ message, node: nodeId }) },
+  );
+}
+
+/** Answer a request the graph run stopped on, and get the run back as it left
+ *  it: deciding is what releases the execution, so the two change together. */
+export function decideGraphApproval(
+  runId: string,
+  approvalId: string,
+  decision: ApprovalDecision,
+): Promise<ApiGraphRun> {
+  return api<ApiGraphRun>(
+    `/graph/api/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approvalId)}`,
+    { method: "POST", body: JSON.stringify({ decision }) },
+  );
+}
 
 /** Record the decision a run stopped for, and get the finished run back.
  *

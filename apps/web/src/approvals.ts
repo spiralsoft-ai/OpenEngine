@@ -18,7 +18,12 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import type { ApiApproval } from "./api";
+import {
+  answerQuestion,
+  decideApproval,
+  type ApiApproval,
+  type ApprovalDecision,
+} from "./api";
 
 export type InlineApproval = {
   /** The assistant turn that raised it, as an index into the thread.
@@ -74,6 +79,48 @@ export function publishApproval(
 
 export function readApprovals(threadId: string): readonly InlineApproval[] {
   return byThread.get(threadId) ?? NONE;
+}
+
+/** How a conversation answers what it was asked.
+ *
+ *  Beside the requests themselves rather than passed down to the card, because
+ *  the two are the same fact: a conversation that publishes an approval is the
+ *  conversation that has to be able to settle it, and every component between
+ *  the transcript and the button would otherwise be carrying a pair of
+ *  callbacks it has nothing to do with.
+ *
+ *  A chat is answered through its thread, which is what the default does. A
+ *  graph WorkOrder's conversation belongs to the graph engine and is answered
+ *  there, so it registers its own for as long as it is on screen. */
+export type ApprovalActions = {
+  decide(approvalId: string, decision: ApprovalDecision): Promise<unknown>;
+  answer(approvalId: string, answers: Record<string, string[]>): Promise<unknown>;
+};
+
+const answering = new Map<string, ApprovalActions>();
+
+/** Answer this conversation's requests with `actions` until the returned
+ *  function is called. Only the registration still in place wins, so a page
+ *  unmounting cannot take a later one's answering with it. */
+export function answerApprovalsWith(
+  threadId: string,
+  actions: ApprovalActions,
+): () => void {
+  answering.set(threadId, actions);
+  return () => {
+    if (answering.get(threadId) === actions) answering.delete(threadId);
+  };
+}
+
+export function approvalActions(threadId: string): ApprovalActions {
+  return (
+    answering.get(threadId) ?? {
+      decide: (approvalId, decision) =>
+        decideApproval(threadId, approvalId, decision),
+      answer: (approvalId, answers) =>
+        answerQuestion(threadId, approvalId, answers),
+    }
+  );
 }
 
 function subscribeApprovals(threadId: string, listener: () => void): () => void {

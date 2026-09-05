@@ -93,6 +93,18 @@ function unplacedQuestion(overrides: Partial<ApiApproval> = {}): ApiApproval {
     toolCallId: null,
     decision: null,
     decisionSource: null,
+    // The questions are what make it one: a request under this kind that
+    // carries none is a verdict rather than a form, and reads as one.
+    questions: [
+      {
+        id: "api",
+        header: "API",
+        question: "Question",
+        options: [{ label: "Public", description: "Preserve the public API" }],
+        multiSelect: false,
+        allowsOther: false,
+      },
+    ],
     ...overrides,
   });
 }

@@ -405,6 +405,7 @@ class LangGraphRuntime:
         continuation: Any | None = None,
         request: Mapping[str, object] | None = None,
         approval_id: ApprovalId | None = None,
+        tool_call_id: str = "",
     ) -> ApprovalDecision:
         """Ask, write the question down, and wait without leaving the node.
 
@@ -413,6 +414,14 @@ class LangGraphRuntime:
         needs to route the answer -- which run, which execution, and the ACP
         continuation that reaches the conversation -- is in the store by the
         time this suspends.
+
+        `tool_call_id` travels on the event because a question is about
+        something: an agent asks to run *this* command, and a reader shown the
+        question apart from the call it is about has to guess which of the
+        turn's calls it means. It names the call in the agent's own vocabulary,
+        which is the same id the `tool.call` event carries -- so a client can
+        show the two together without matching on wording. Empty for a request
+        that is about no call at all, such as a person's verdict on a run.
         """
         chosen = approval_id or ApprovalId(f"approval-{uuid4().hex[:12]}")
         record = ApprovalRecord(
@@ -439,6 +448,7 @@ class LangGraphRuntime:
                 "reason": reason,
                 "command": command,
                 "toolName": tool_name,
+                "toolCallId": tool_call_id,
             },
             execution.node_id,
             execution.execution_id,

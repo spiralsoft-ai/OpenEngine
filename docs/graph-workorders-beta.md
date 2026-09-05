@@ -45,13 +45,30 @@ underneath can do, which is the reason the second one exists:
 4. You land on the WorkOrder page, which shows the task, the repository and
    whether the run is still going.
 
+## Following one, and talking to it
+
+The WorkOrder page shows a graph run's stages, and each agent node has an **Open
+conversation** link once it has said anything. That conversation is the same
+view a chat is: the task the node was given as the first turn, what the agent
+said, its tool calls folded into rows you can open, and — while the agent is
+working — a box to write in. What you write is *steering*: a message into the
+turn the agent is in the middle of, not a new one. A node that has finished has
+nothing in flight to say it to, so the box is not offered.
+
+When an agent stops to ask permission, the request appears in that conversation
+under the command it is about, with the buttons to answer it. The run's final
+human verdict is answered from the WorkOrder page itself, in the **Action
+required** panel.
+
 ## What it cannot do yet — and this is why it says `[BETA]`
 
-The WorkOrder page cannot show you a graph run's stages, its agents'
-conversations, or the question it stopped on. It shows a row and an ending.
+The event log a conversation is drawn from lives in the server's memory, so
+restarting the server empties it: the run picks back up (see below), but what
+was said before the restart is gone from the page. Nothing else keeps a graph
+run's transcript, so this is the one thing to know before relying on it.
 
-Everything else is served by the graph engine's own API, which the web server
-passes through under `/graph`:
+Everything the pages read is served by the graph engine's own API, which the web
+server passes through under `/graph`:
 
 ```
 GET  /graph/api/graphs                              every graph it can run
@@ -81,9 +98,9 @@ full Python traceback. Recent ACP adapter stderr is included there when the
 adapter refuses a request or exits; it is otherwise kept out of the transcript.
 
 A run stops and waits the first time an agent asks permission, and again at the
-end when it wants a person's verdict. Until the pages catch up, those are
-answered with the last call above. `GET /graph/api/runs/{run}` lists what is
-outstanding, with the id to answer.
+end when it wants a person's verdict. Both are answerable from the pages; the
+last call above is the same answer given from a script, and
+`GET /graph/api/runs/{run}` lists what is outstanding with the id to answer.
 
 ## Where things are kept
 

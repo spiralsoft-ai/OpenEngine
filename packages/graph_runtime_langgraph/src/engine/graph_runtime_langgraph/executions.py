@@ -221,6 +221,7 @@ class NodeExecution:
         continuation: Any | None = None,
         request: Mapping[str, object] | None = None,
         approval_id: ApprovalId | None = None,
+        tool_call_id: str = "",
     ) -> ApprovalDecision:
         """Raise a request for consent and wait, without leaving the node.
 
@@ -228,6 +229,9 @@ class NodeExecution:
         waiting, so a process that dies here leaves an answerable question
         behind rather than a lost one. `continuation` is what makes answering it
         later mean something: it names the conversation to reconnect to.
+
+        `tool_call_id` is which of the turn's calls the question is about, for
+        a client drawing the question beside it. Empty when it is about none.
         """
         return await self._runtime.raise_approval(
             self,
@@ -239,6 +243,7 @@ class NodeExecution:
             continuation=continuation,
             request=request,
             approval_id=approval_id,
+            tool_call_id=tool_call_id,
         )
 
     # --- the runtime's own bookkeeping -------------------------------------

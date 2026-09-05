@@ -29,6 +29,30 @@ const GREETING = "greeting.txt";
 const IMPLEMENTED = "Wrote the greeting.";
 const REVIEWED = "Read the change; greeting.txt is not covered by a test.";
 
+const STEER = "Also write a licence file.";
+const STEERED = "Wrote the licence.";
+
+/** The same journey, with the agent stopping to ask before it writes.
+ *
+ *  Which is the state a conversation has to be readable and answerable in: the
+ *  node is in flight, holding its turn, and the person it is waiting on is the
+ *  one reading the page. */
+const ASKING_SCRIPT: Script = {
+  title: "Adding a greeting",
+  scenarios: [
+    { when: "Review the implementation", steps: [{ type: "say", text: REVIEWED }] },
+    { when: STEER, steps: [{ type: "say", text: STEERED }] },
+    {
+      when: "Implement the requested change",
+      steps: [
+        { type: "say", text: "Writing the greeting." },
+        { type: "run", command: `echo hello > ${GREETING}`, approval: true },
+        { type: "say", text: IMPLEMENTED },
+      ],
+    },
+  ],
+};
+
 const SCRIPT: Script = {
   title: "Adding a greeting",
   scenarios: [
@@ -137,23 +161,66 @@ test("@beta the checkout a graph run works in is on its WorkOrder page", async (
   await expect(checkout).toContainText("cd ");
 });
 
-test("@beta an agent's conversation is readable from the WorkOrder page", async ({
-  page,
-  engine,
-}) => {
-  engine.script(SCRIPT);
-
-  const runUrl = await create(page, engine.repository);
+/** Open the implementation node's conversation from the WorkOrder page. */
+async function openConversation(page: Page, runUrl: string): Promise<void> {
   await page.goto(runUrl);
-
   await page
     .locator(".step")
     .filter({ has: page.getByRole("heading", { name: "Implementation", exact: true }) })
     .getByRole("link", { name: "Open conversation" })
     .click();
-
   await expect(page).toHaveURL(/\/conversations\//);
+}
+
+test("@beta an agent's conversation is readable from the WorkOrder page", async ({
+  page,
+  engine,
+}, testInfo) => {
+  engine.script(SCRIPT);
+
+  const runUrl = await create(page, engine.repository);
+  await openConversation(page, runUrl);
+
+  // Both halves of it, drawn as the chat draws a chat: what the node was asked
+  // is the reader's turn, what it said is the agent's, and the command it ran
+  // is a folded row in between rather than a paragraph of its own.
+  await expect(page.locator(".message-user").first()).toContainText(TASK);
   await expect(page.getByText("Writing the greeting.")).toBeVisible();
+  await expect(page.locator(".message-assistant .tool").first()).toContainText(
+    `echo hello > ${GREETING}`,
+  );
+  await shot(page, testInfo, "4 the conversation");
+});
+
+test("@beta an agent waiting on permission is answered in its conversation", async ({
+  page,
+  engine,
+}, testInfo) => {
+  engine.script(ASKING_SCRIPT);
+
+  const runUrl = await create(page, engine.repository);
+  await expect
+    .poll(async () => (await graphRun(page, runUrl)).pendingApprovals?.length ?? 0, {
+      timeout: 60_000,
+    })
+    .toBe(1);
+  await openConversation(page, runUrl);
+
+  // The question, where the command it is about is: the run is stopped here,
+  // and this is the page the person it is stopped on is reading.
+  const card = page.locator(".approval-pending");
+  await expect(card).toContainText(`echo hello > ${GREETING}`);
+  await shot(page, testInfo, "5 waiting on permission");
+
+  // Steering, while it waits. The agent is holding its turn, so this is a
+  // message into the conversation rather than a new one.
+  await page.getByLabel("Message the agent").fill(STEER);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(STEER)).toBeVisible();
+
+  await card.getByRole("button", { name: "Approve" }).click();
+
+  await expect(page.getByText(STEERED)).toBeVisible({ timeout: 60_000 });
 });
 
 test("@beta a graph run waiting on a person says so, and can be answered", async ({

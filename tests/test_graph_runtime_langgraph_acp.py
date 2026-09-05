@@ -247,7 +247,10 @@ def test_an_acp_node_runs_a_turn_and_publishes_what_happened(tmp_path: Path) -> 
 
     events, values = asyncio.run(scenario())
 
-    assert transcript(events) == [("assistant", DONE)]
+    # Both halves of the turn: what the node was sent to do, and what it said
+    # about doing it. A transcript holding only the second is not a
+    # conversation, and a reader opening one has to guess what was asked.
+    assert transcript(events) == [("user", PROMPT), ("assistant", DONE)]
     assert values == {str(IMPLEMENTATION): DONE, str(REVIEW): "Looks right."}
     started = [event for event in events if event.kind.value == "conversation.started"]
     assert len(started) == 1
@@ -283,6 +286,7 @@ def test_what_an_agent_says_is_published_where_it_said_it(tmp_path: Path) -> Non
     events = asyncio.run(scenario())
 
     assert activity(events, IMPLEMENTATION) == [
+        ("transcript", PROMPT),
         ("transcript", NARRATION),
         ("tool.call", NARRATED_TOOL),
         ("tool.result", NARRATED_TOOL),
@@ -322,6 +326,7 @@ def test_a_line_explaining_a_request_is_published_before_the_wait(
     waiting = asyncio.run(scenario())
 
     assert activity(waiting, IMPLEMENTATION) == [
+        ("transcript", PROMPT),
         ("transcript", ASK_NARRATION),
         ("approval.requested", "run the tests"),
     ]
@@ -371,6 +376,7 @@ def test_steering_an_acp_execution_continues_the_same_session(tmp_path: Path) ->
     ]
     assert outcome["entered"] == 1
     assert transcript(outcome["events"]) == [
+        ("user", PROMPT),
         ("assistant", DONE),
         ("user", "Use the fast suite."),
         ("assistant", DONE),
@@ -431,7 +437,15 @@ def test_an_acp_permission_request_becomes_an_answerable_approval(
     assert stored.continuation.session_id in sessions(tmp_path)
     assert stored.continuation.thread_id == str(outcome["paused"].run_id)
     assert outcome["released"].pending_approvals == ()
-    assert transcript(outcome["events"]) == [("assistant", DONE)]
+    assert transcript(outcome["events"]) == [("user", PROMPT), ("assistant", DONE)]
+    # The call the question was about, in the agent's own ids, so a client can
+    # draw the question beside the command rather than beside the whole turn.
+    requested = next(
+        event
+        for event in outcome["events"]
+        if event.kind.value == "approval.requested"
+    )
+    assert requested.payload["toolCallId"] == "call_1"
 
 
 def test_refusing_an_acp_approval_stops_the_run_where_it_asked(

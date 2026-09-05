@@ -11,10 +11,11 @@ only one of them ships only one of these files.
 
 **This is offered, and it is new.** The web interface lists it in the WorkOrder
 dropdown behind a `[BETA]` label, and creating a WorkOrder with it starts the
-graph below on the graph engine. Beta because the interface can start one and
-then has nowhere to show it: a run's stages, its agents' conversations and the
-question it stops on are served by the graph engine's own API, under `/graph`,
-rather than by the WorkOrder page. See `docs/graph-workorders-beta.md`.
+graph below on the graph engine. Its stages, its agents' conversations and the
+questions it stops on are on the WorkOrder page, drawn from the events the run
+publishes. Beta because those events are held in the server's memory, so a
+restart loses the transcript of what was said before it. See
+`docs/graph-workorders-beta.md`.
 
 Three things the graph runtime can do that the step runtime cannot, which is
 what makes this more than a translation:
